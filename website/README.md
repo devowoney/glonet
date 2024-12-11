@@ -12,7 +12,8 @@ GLONET is an awesome Neural Network.
 
 ### Publications
 
-- [A. El Aouni et al, 2024, GLONET: MERCATOR’S END-TO-END NEURAL FORECASTING SYSTEM](https://agu.confex.com/agu/agu24/meetingapp.cgi/Paper/1524960).
+- [A. El Aouni et al, 2024, AGU24, GLONET: MERCATOR’S END-TO-END NEURAL FORECASTING SYSTEM](https://agu.confex.com/agu/agu24/meetingapp.cgi/Paper/1524960).
+- [A. El Aouni et al, 2024, Preprint, GLONET: MERCATOR’S END-TO-END NEURAL FORECASTING SYSTEM](https://arxiv.org/abs/2412.05454).
 
 ## GLONET on EDITO
 
