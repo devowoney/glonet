@@ -1,4 +1,4 @@
-# GLONET: Mercator Ocean's AI system
+# GLONET: Mercator's End-to-End Neural Forecasting System
 
 GLONET is a neural-network ocean system developed by [Mercator Ocean international](https://www.mercator-ocean.eu/) as part of the [EDITO-ModelLab project](https://edito-modellab.eu/).
 
@@ -8,7 +8,14 @@ GLONET is a neural-network ocean system developed by [Mercator Ocean internation
 
 ## GLONET
 
-GLONET is an awesome Neural Network.
+Accurate ocean forecasting is crucial in different areas ranging from science to decision making. 
+Recent advancements in data-driven models have shown significant promise, particularly in weather forecasting community, but yet no data-driven approaches have matched the accuracy and the scalability of traditional global ocean forecasting systems that rely on physics-driven numerical models and can be very computationally expensive, depending on their spatial resolution or complexity.
+Here, we introduce GLONET, a global ocean neural network-based forecasting system, developed by Mercator Ocean International.
+GLONET is trained on the global Mercator Ocean physical reanalysis GLORYS12 to integrate physics-based principles through neural operators and networks, which dynamically capture local-global interactions within a unified, scalable framework, ensuring high small-scale accuracy and efficient dynamics.
+GLONET's performance is assessed and benchmarked against two other forecasting systems: the global Mercator Ocean analysis and forecasting 1/12 high-resolution physical system GLO12 and a recent neural-based system also trained from GLORYS12.
+A series of comprehensive validation metrics is proposed, specifically tailored for neural network-based ocean forecasting systems, which extend beyond traditional point-wise error assessments that can introduce bias towards neural networks optimized primarily to minimize such metrics.
+The preliminary evaluation of GLONET shows promising results, for temperature, sea surface height, salinity and ocean currents.
+GLONET's experimental daily forecast are accessible through the European Digital Twin Ocean platform EDITO.
 
 ### Publications
 
@@ -26,7 +33,7 @@ Some GLONET capabilities as been ported to the [EDITO platform](https://dive.edi
 
 You can browse the forecasts assets at **1/4 resolution** on [EDITO viewer](https://viewer.dive.edito.eu/map?catalog=https://api.dive.edito.eu/data/catalogs/glonet/glonet_1_4_daily_forecast).
 The **10-day forecasts** are **updated daily** on the platform, using the [daily mean fields from Global Ocean Physics Analysis and Forecast](https://viewer.dive.edito.eu/map?catalog=https://api.dive.edito.eu/data/catalogs/copernicus-marine-products/copernicus-marine-product-GLOBAL_ANALYSISFORECAST_PHY_001_024/copernicus-marine-dataset-cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m) of the day as initial state of the forecast.
-The forecast of the **last 10 days are kept in the EDITO data lake**, but forecast of the **anterior days can be reproduced on-demand**.
+The forecast of the **last 15 days are kept in the EDITO data lake**, but forecasts of the **15 anterior days can be reproduced on-demand**.
 
 Among other information, the metadata exposes links allowing you to continue the exploration of the data inside a Jupterlab instance running on the [EDITO datalab](https://datalab.dive.edito.eu/).
 
@@ -42,10 +49,6 @@ At launch time, you can choose:
 To propriety reason, the access to this process is **restricted to identified research partners**.
 If you wish to run GLONET on-demand on EDITO, please [contact us](contact.md).
 
-### Architecture blueprint
-
-This section focuses on explaining how GLONET capabilities have been ported to EDITO.
-
 ## Contact
 
-For any information about GLONET, you can contact...
+For any information about GLONET, you can contact [glonet@mercator-ocean.eu](mailto:glonet@mercator-ocean.eu).
