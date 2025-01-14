@@ -2,7 +2,7 @@
 
 GLONET is a neural-network ocean system developed by [Mercator Ocean international](https://www.mercator-ocean.eu/) as part of the [EDITO-ModelLab project](https://edito-modellab.eu/).
 
-##  Get started
+## Get started
 
 [table of content](./_sidebar.md ':include')
 
@@ -47,7 +47,7 @@ At launch time, you can choose:
 0. Where to store the output data
 
 To propriety reason, the access to this process is **restricted to identified research partners**.
-If you wish to run GLONET on-demand on EDITO, please [contact us](contact.md).
+If you wish to run GLONET on-demand on EDITO, please [contact us](#contact).
 
 ## Contact
 
