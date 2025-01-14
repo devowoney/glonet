@@ -1,12 +1,12 @@
 stages:
   - website
 
-force-online-website-to-pull:
+force-online-website-to-update:
   stage: website
   tags:
     - shell
   script:
-    - make force-online-website-to-pull
+    - make force-online-website-to-update
   rules:
     - if: $CI_PIPELINE_SOURCE != "schedule" && $CI_PIPELINE_SOURCE != "merge_request_event"
   retry:
