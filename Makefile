@@ -10,5 +10,5 @@ deploy-website-locally:
 	@echo "they have to be embdeded with HTML, where the path is not the good one locally"
 	cd website && python -m http.server 3000
 
-force-online-website-to-pull:
-	curl https://glonet.lab.dive.edito.eu/pull
+force-online-website-to-update:
+	curl https://glonet.lab.dive.edito.eu/update
