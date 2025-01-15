@@ -2,11 +2,11 @@
 
 GLONET is a neural-network ocean system developed by [Mercator Ocean international](https://www.mercator-ocean.eu/) as part of the [EDITO-ModelLab project](https://edito-modellab.eu/).
 
-## Get started
+<!-- ## Get started -->
 
-[table of content](./_sidebar.md ':include')
+<!-- [table of content](./_sidebar.md ':include') -->
 
-## GLONET
+## Introduction to GLONET
 
 Accurate ocean forecasting is crucial in different areas ranging from science to decision making. 
 Recent advancements in data-driven models have shown significant promise, particularly in weather forecasting community, but yet no data-driven approaches have matched the accuracy and the scalability of traditional global ocean forecasting systems that rely on physics-driven numerical models and can be very computationally expensive, depending on their spatial resolution or complexity.
@@ -16,6 +16,46 @@ GLONET's performance is assessed and benchmarked against two other forecasting s
 A series of comprehensive validation metrics is proposed, specifically tailored for neural network-based ocean forecasting systems, which extend beyond traditional point-wise error assessments that can introduce bias towards neural networks optimized primarily to minimize such metrics.
 The preliminary evaluation of GLONET shows promising results, for temperature, sea surface height, salinity and ocean currents.
 GLONET's experimental daily forecast are accessible through the European Digital Twin Ocean platform EDITO.
+
+### Architecture overview
+
+<div align="center">
+<figure>
+<img
+src="https://minio.dive.edito.eu/project-glonet/public/glonet_thumbnail.png"
+alt="GLONET architecture overview" width="800">
+<figcaption>Overview of GLONET’s architecture containing different modules, particularly time-block designed
+to learn feature maps encapsulating initial conditions along with forcings. A spatial module architectured to
+learn multi-scale dynamics, and finally and encoder-decoder to fuse multi-scale circulations into a unified
+latent space.</figcaption>
+</figure>
+</div>
+
+### Output variables
+
+#### Surface height
+
+The 2D sea surface height above geoid, as defined in the [Climate Forecast Convention](https://cfconventions.org/).
+
+![Sea surface height above geoid](/assets/zos_ortho.png ':size=30%')
+
+#### Temperature
+
+The 3D sea water potential temperature, as defined in the [Climate Forecast Convention](https://cfconventions.org/).
+
+![Sea water potential temperature](/assets/thetao_ortho.png ':size=30%')
+
+#### Salinity
+
+The 3D sea water salinity, as defined in the [Climate Forecast Convention](https://cfconventions.org/).
+
+![Sea water salinity](/assets/so_ortho.png ':size=30%')
+
+#### Current
+
+The 3D eastward sea water velocity and northward sea water velocity, as defined in the [Climate Forecast Convention](https://cfconventions.org/).
+![Eastward sea water velocity](/assets/uo_ortho.png ':size=30%')
+![Northward sea water velocity](/assets/vo_ortho.png ':size=30%')
 
 ### Publications
 
@@ -32,6 +72,9 @@ Some GLONET capabilities as been ported to the [EDITO platform](https://dive.edi
 ### Daily forecasts
 
 You can browse the forecasts assets at **1/4 resolution** on [EDITO viewer](https://viewer.dive.edito.eu/map?catalog=https://api.dive.edito.eu/data/catalogs/glonet/glonet_1_4_daily_forecast).
+
+[GLONET daily forecasts on EDITO viewer](https://viewer.dive.edito.eu/map?catalog=https://api.dive.edito.eu/data/catalogs/glonet/glonet_1_4_daily_forecast ':include :type=iframe width=100% height=600px')
+
 The **10-day forecasts** are **updated daily** on the platform, using the [daily mean fields from Global Ocean Physics Analysis and Forecast](https://viewer.dive.edito.eu/map?catalog=https://api.dive.edito.eu/data/catalogs/copernicus-marine-products/copernicus-marine-product-GLOBAL_ANALYSISFORECAST_PHY_001_024/copernicus-marine-dataset-cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m) of the day as initial state of the forecast.
 The forecast of the **last 15 days are kept in the EDITO data lake**, but forecasts of the **15 anterior days can be reproduced on-demand**.
 
