@@ -233,7 +233,7 @@ def add_metadata(ds, date):
     ds.attrs["Conventions"] = "CF-1.8"
     ds.attrs["area"] = "Global"
     ds.attrs["Conventions"] = "CF-1.8"
-    ds.attrs["contact"] = "{aelaouni}{qgaudel}@mercator-ocean.eu"
+    ds.attrs["contact"] = "glonet@mercator-ocean.eu"
     ds.attrs["institution"] = "Mercator Ocean International"
     ds.attrs["source"] = "MOI GLONET"
     ds.attrs["title"] = (
