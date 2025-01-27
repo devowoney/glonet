@@ -90,7 +90,7 @@ At launch time, you can choose:
 0. Which data to use as initial state of the forecast
 0. Where to store the output data
 
-To propriety reason, the access to this process is **restricted to identified research partners**.
+For propriety reason, the access to this process is **restricted to identified research partners**.
 If you wish to run GLONET on-demand on EDITO, please [contact us](#contact).
 
 ## Contact
