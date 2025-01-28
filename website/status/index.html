@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLONET status</title>
+    <style>
+body {
+  font-family: Arial, sans-serif;
+  margin: 20px;
+}
+        #datetime {
+          font-size: 1.5rem;
+          color: #333;
+          margin-top: 10px;
+        }
+    </style>
+  </head>
+  <body>
+    <h1>Status</h1>
+    <h2>GLONET daily forecast on EDITO</h2>
+    <h3>Global status</h3>
+    <div id="globalStatus">Loading...</div>
+    <h3>GLONET forecasts up to date with Copernicus Marine catalog</h3>
+    <div id="glonetForecastsUpToDateWithCopernicusMarineCatalogDiv">Loading...</div>
+    <h3>Copernicus Marine catalogs synchronization</h3>
+    <div id="copernicusMarineCatalogsSynchronization">Loading...</div>
+    <h3>Copernicus Marine GLOBAL_ANALYSISFORECAST_PHY_001_024 delay</h3>
+    <div id="copernicusMarineDelay">Loading...</div>
+
+    <h3>Debug</h3>
+
+    <h4>GLONET latest forecast end datetime on EDITO</h4>
+    <div id="glonetDatetime">Loading...</div>
+
+    <h4>GLOBAL_ANALYSISFORECAST_PHY_001_024 forecast end datetime on EDITO</h4>
+    <div id="editoDatetime">Loading...</div>
+
+    <h4>GLOBAL_ANALYSISFORECAST_PHY_001_024 forecast end datetime on Copernicus Marine Service</h4>
+    <div id="copernicusMarineDatetime">Loading...</div>
+
+    <script>
+      const editoUrl = "https://api.dive.edito.eu/data/collections/climate_forecast-northward_sea_water_velocity/items/GLOBAL_ANALYSISFORECAST_PHY_001_024-cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m-202406-default-arco-geo-series-northward_sea_water_velocity-vo";
+
+      fetch(editoUrl)
+        .then(response => response.json())
+        .then(data => {
+          const editoForecastEndDatetime = `${data.properties.end_datetime}`;
+
+          document.getElementById('editoDatetime').textContent = editoForecastEndDatetime;
+          const copernicusMarineUrl = "https://s3.waw3-1.cloudferro.com/mdl-metadata/metadata/GLOBAL_ANALYSISFORECAST_PHY_001_024/cmems_mod_glo_phy_anfc_0.083deg_P1D-m_202406/dataset.stac.json";
+
+          fetch(copernicusMarineUrl)
+            .then(response => response.json())
+            .then(data => {
+              const copernicusMarineForecastEndDatetime = `${data.properties.end_datetime}`;
+
+              document.getElementById('copernicusMarineDatetime').textContent = copernicusMarineForecastEndDatetime + " (should be nine days after today " + new Date() + ")";
+              const copernicusMarineCatalogsSynchronized = (new Date(copernicusMarineForecastEndDatetime).getTime() === new Date(editoForecastEndDatetime).getTime())
+              const copernicusMarineCatalogsSynchronizationText = (copernicusMarineCatalogsSynchronized) ? "Synchronized" : "Not synchronized";
+              const copernicusMarineCatalogsSynchronizationColor = (copernicusMarineCatalogsSynchronized) ? "lightGreen" : "red";
+              document.getElementById('copernicusMarineCatalogsSynchronization').textContent = copernicusMarineCatalogsSynchronizationText;
+              document.getElementById('copernicusMarineCatalogsSynchronization').style.backgroundColor = copernicusMarineCatalogsSynchronizationColor;
+
+              const copernicusMarineControlDatetime = new Date(copernicusMarineForecastEndDatetime)
+              copernicusMarineControlDatetime.setDate(copernicusMarineControlDatetime.getDate() - 9)
+              const todayControlDatetime = new Date()
+              todayControlDatetime.setHours(copernicusMarineControlDatetime.getHours())
+              todayControlDatetime.setMinutes(copernicusMarineControlDatetime.getMinutes())
+              todayControlDatetime.setSeconds(copernicusMarineControlDatetime.getSeconds())
+              todayControlDatetime.setMilliseconds(copernicusMarineControlDatetime.getMilliseconds())
+              const copernicusMarineHasNoDelay = (todayControlDatetime.getTime() === copernicusMarineControlDatetime.getTime())
+              const copernicusMarineDelayText = (copernicusMarineHasNoDelay) ? "No delay" : "Late";
+              const copernicusMarineDelayColor = (copernicusMarineHasNoDelay) ? "lightGreen" : "orange";
+              document.getElementById('copernicusMarineDelay').textContent = copernicusMarineDelayText;
+              document.getElementById('copernicusMarineDelay').style.backgroundColor = copernicusMarineDelayColor;
+
+              const glonetUrl = "https://api.dive.edito.eu/data/catalogs/glonet/glonet_1_4_daily_forecast";
+
+              fetch(glonetUrl)
+                .then(response => response.json())
+                .then(data => {
+                  const latestForecastCatalog = `${data.links[data.links.length-1].href}`;
+                  fetch(latestForecastCatalog)
+                    .then(response => response.json())
+                    .then(data => {
+                      const latestForecastVariable = `${data.links[data.links.length-1].href}`;
+                      fetch(latestForecastVariable)
+                        .then(response => response.json())
+                        .then(data => {
+                          const latestForecastEndDatetime = `${data.properties.end_datetime}`;
+
+                          document.getElementById('glonetDatetime').textContent = latestForecastEndDatetime + " (should be one day after GLOBAL_ANALYSISFORECAST_PHY_001_024)";
+
+                          const glonetControlDatetime = new Date(editoForecastEndDatetime)
+                          glonetControlDatetime.setDate(glonetControlDatetime.getDate() - 1)
+                          const glonetForecastsUpToDateWithCopernicusMarineCatalog = (new Date(editoForecastEndDatetime).getTime() === glonetControlDatetime.getTime())
+                          const glonetForecastsUpTodateWithCopernicusMarineCatalogText = (glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "Synchronized" : "Not synchronized";
+                          const glonetForecastsUpTodateWithCopernicusMarineCatalogColor = (glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "lightGreen" : "red";
+                          document.getElementById('glonetForecastsUpToDateWithCopernicusMarineCatalogDiv').textContent = glonetForecastsUpTodateWithCopernicusMarineCatalogText;
+                          document.getElementById('glonetForecastsUpToDateWithCopernicusMarineCatalogDiv').style.backgroundColor = glonetForecastsUpTodateWithCopernicusMarineCatalogColor;
+
+                          const globalStatusText = (copernicusMarineCatalogsSynchronized && glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "OK" : "KO";
+                          const globalStatusColor = (copernicusMarineCatalogsSynchronized && glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "lightGreen" : "red";
+                          document.getElementById('globalStatus').textContent = globalStatusText;
+                          document.getElementById('globalStatus').style.backgroundColor = globalStatusColor;
+                        })
+                    })
+                })
+                .catch(err => {
+                  console.error(err);
+                  document.getElementById('glonetDatetime').textContent = 'Failed to load data.';
+                });
+            })
+            .catch(err => {
+              console.error(err);
+              document.getElementById('copernicusMarineDatetime').textContent = 'Failed to load data.';
+            });
+        })
+        .catch(err => {
+          console.error(err);
+          document.getElementById('editoDatetime').textContent = 'Failed to load data.';
+        });
+    </script>
+
+  </body>
+</html>

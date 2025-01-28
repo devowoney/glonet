@@ -81,6 +81,10 @@ The forecast of the **last 15 days are kept in the EDITO data lake**, but foreca
 
 Among other information, the metadata exposes links allowing you to continue the exploration of the data inside a Jupterlab instance running on the [EDITO datalab](https://datalab.dive.edito.eu/).
 
+#### Status
+
+You can check the daily forecast status [here](https://glonet.lab.dive.edito.eu/status).
+
 ### On-demand forecasts
 
 An EDITO process is available to (re)produced GLONET forecast.
