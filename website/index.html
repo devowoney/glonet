@@ -38,22 +38,8 @@
             hook.beforeEach(function (html) {
               // The date template pattern
               $docsify.formatUpdated = '{YYYY}/{MM}/{DD} {HH}:{mm}';
-              const url = "https://api.dive.edito.eu/data/collections/climate_forecast-northward_sea_water_velocity/items/GLOBAL_ANALYSISFORECAST_PHY_001_024-cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m-202406-default-arco-geo-series-northward_sea_water_velocity-vo"
-              var lastForecastDatetime = "toto"
-              fetch(url)
-                .then(resolve => resolve.json())
-                .then(data => {
-                    lastForecastDatetime = `${data.properties.end_datetime}`
-                    console.log(lastForecastDatetime)
-                    return lastForecastDatetime
-                })
-                .catch((err) => {
-                    console.log(err);
-                })
               return (
                 html +
-                '\n\n----\n\n' +
-                lastForecastDatetime +
                 '\n\n----\n\n' +
                 '<img src="https://datalab.dive.edito.eu/custom-resources/logos/Full_EU_DTO_Banner.jpeg" alt="all-logo" width="400" class="center"/>' +
                 '\n\n\n\n' +
