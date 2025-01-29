@@ -89,7 +89,7 @@ body {
 
                           document.getElementById('glonetDatetime').textContent = latestForecastEndDatetime + " (should be one day after GLOBAL_ANALYSISFORECAST_PHY_001_024)";
 
-                          const glonetControlDatetime = new Date(editoForecastEndDatetime)
+                          const glonetControlDatetime = new Date(latestForecastEndDatetime)
                           glonetControlDatetime.setDate(glonetControlDatetime.getDate() - 1)
                           const glonetForecastsUpToDateWithCopernicusMarineCatalog = (new Date(editoForecastEndDatetime).getTime() === glonetControlDatetime.getTime())
                           const glonetForecastsUpTodateWithCopernicusMarineCatalogText = (glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "Latest GLONET EDITO forecast production is on time" : "Latest GLONET EDITO forecast production is late";
