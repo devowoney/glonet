@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GLONET status</title>
+    <title>GLONET EDITO status</title>
     <style>
 body {
   font-family: Arial, sans-serif;
@@ -17,18 +17,11 @@ body {
     </style>
   </head>
   <body>
-    <h1>Status</h1>
-    <h2>GLONET daily forecast on EDITO</h2>
-    <h3>Global status</h3>
-    <div id="globalStatus">Loading...</div>
-    <h3>GLONET forecasts up to date with Copernicus Marine catalog</h3>
     <div id="glonetForecastsUpToDateWithCopernicusMarineCatalogDiv">Loading...</div>
-    <h3>Copernicus Marine catalogs synchronization</h3>
-    <div id="copernicusMarineCatalogsSynchronization">Loading...</div>
-    <h3>Copernicus Marine GLOBAL_ANALYSISFORECAST_PHY_001_024 delay</h3>
     <div id="copernicusMarineDelay">Loading...</div>
 
     <h3>Debug</h3>
+    <div id="copernicusMarineCatalogsAlignement">Loading...</div>
 
     <h4>GLONET latest forecast end datetime on EDITO</h4>
     <div id="glonetDatetime">Loading...</div>
@@ -56,11 +49,13 @@ body {
               const copernicusMarineForecastEndDatetime = `${data.properties.end_datetime}`;
 
               document.getElementById('copernicusMarineDatetime').textContent = copernicusMarineForecastEndDatetime + " (should be nine days after today " + new Date() + ")";
-              const copernicusMarineCatalogsSynchronized = (new Date(copernicusMarineForecastEndDatetime).getTime() === new Date(editoForecastEndDatetime).getTime())
-              const copernicusMarineCatalogsSynchronizationText = (copernicusMarineCatalogsSynchronized) ? "Synchronized" : "Not synchronized";
-              const copernicusMarineCatalogsSynchronizationColor = (copernicusMarineCatalogsSynchronized) ? "lightGreen" : "red";
-              document.getElementById('copernicusMarineCatalogsSynchronization').textContent = copernicusMarineCatalogsSynchronizationText;
-              document.getElementById('copernicusMarineCatalogsSynchronization').style.backgroundColor = copernicusMarineCatalogsSynchronizationColor;
+              const copernicusMarineCatalogsAligned = (new Date(copernicusMarineForecastEndDatetime).getTime() === new Date(editoForecastEndDatetime).getTime())
+              const copernicusMarineCatalogsAlignementText = (copernicusMarineCatalogsAligned) ? "Copernicus Marine and EDITO catalogs about daily mean fields from Global Ocean Physics Analysis and Forecast are aligned" : "Copernicus Marine and EDITO catalogs about daily mean fields from Global Ocean Physics Analysis and Forecast are not aligned";
+              const copernicusMarineCatalogsAlignementTextColor = (copernicusMarineCatalogsAligned) ? "black" : "white";
+              const copernicusMarineCatalogsAlignementBackgroundColor = (copernicusMarineCatalogsAligned) ? "lightGreen" : "red";
+              document.getElementById('copernicusMarineCatalogsAlignement').textContent = copernicusMarineCatalogsAlignementText;
+              document.getElementById('copernicusMarineCatalogsAlignement').style.color = copernicusMarineCatalogsAlignementTextColor;
+              document.getElementById('copernicusMarineCatalogsAlignement').style.backgroundColor = copernicusMarineCatalogsAlignementBackgroundColor;
 
               const copernicusMarineControlDatetime = new Date(copernicusMarineForecastEndDatetime)
               copernicusMarineControlDatetime.setDate(copernicusMarineControlDatetime.getDate() - 9)
@@ -70,10 +65,12 @@ body {
               todayControlDatetime.setSeconds(copernicusMarineControlDatetime.getSeconds())
               todayControlDatetime.setMilliseconds(copernicusMarineControlDatetime.getMilliseconds())
               const copernicusMarineHasNoDelay = (todayControlDatetime.getTime() === copernicusMarineControlDatetime.getTime())
-              const copernicusMarineDelayText = (copernicusMarineHasNoDelay) ? "No delay" : "Late";
-              const copernicusMarineDelayColor = (copernicusMarineHasNoDelay) ? "lightGreen" : "orange";
+              const copernicusMarineDelayText = (copernicusMarineHasNoDelay) ? "Daily mean fields from Global Ocean Physics Analysis and Forecast production is on time on Copernicus Marine" : "Daily mean fields from Global Ocean Physics Analysis and Forecast production is late on Copernicus Marine";
+              const copernicusMarineDelayTextColor = (copernicusMarineHasNoDelay) ? "black" : "white";
+              const copernicusMarineDelayBackgroundColor = (copernicusMarineHasNoDelay) ? "lightGreen" : "orange";
               document.getElementById('copernicusMarineDelay').textContent = copernicusMarineDelayText;
-              document.getElementById('copernicusMarineDelay').style.backgroundColor = copernicusMarineDelayColor;
+              document.getElementById('copernicusMarineDelay').style.color = copernicusMarineDelayTextColor;
+              document.getElementById('copernicusMarineDelay').style.backgroundColor = copernicusMarineDelayBackgroundColor;
 
               const glonetUrl = "https://api.dive.edito.eu/data/catalogs/glonet/glonet_1_4_daily_forecast";
 
@@ -95,15 +92,12 @@ body {
                           const glonetControlDatetime = new Date(editoForecastEndDatetime)
                           glonetControlDatetime.setDate(glonetControlDatetime.getDate() - 1)
                           const glonetForecastsUpToDateWithCopernicusMarineCatalog = (new Date(editoForecastEndDatetime).getTime() === glonetControlDatetime.getTime())
-                          const glonetForecastsUpTodateWithCopernicusMarineCatalogText = (glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "Synchronized" : "Not synchronized";
-                          const glonetForecastsUpTodateWithCopernicusMarineCatalogColor = (glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "lightGreen" : "red";
+                          const glonetForecastsUpTodateWithCopernicusMarineCatalogText = (glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "Latest GLONET EDITO forecast production is on time" : "Latest GLONET EDITO forecast production is late";
+                          const glonetForecastsUpTodateWithCopernicusMarineCatalogTextColor = (glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "black" : "white";
+                          const glonetForecastsUpTodateWithCopernicusMarineCatalogBackgroundColor = (glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "lightGreen" : "red";
                           document.getElementById('glonetForecastsUpToDateWithCopernicusMarineCatalogDiv').textContent = glonetForecastsUpTodateWithCopernicusMarineCatalogText;
-                          document.getElementById('glonetForecastsUpToDateWithCopernicusMarineCatalogDiv').style.backgroundColor = glonetForecastsUpTodateWithCopernicusMarineCatalogColor;
-
-                          const globalStatusText = (copernicusMarineCatalogsSynchronized && glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "OK" : "KO";
-                          const globalStatusColor = (copernicusMarineCatalogsSynchronized && glonetForecastsUpToDateWithCopernicusMarineCatalog) ? "lightGreen" : "red";
-                          document.getElementById('globalStatus').textContent = globalStatusText;
-                          document.getElementById('globalStatus').style.backgroundColor = globalStatusColor;
+                          document.getElementById('glonetForecastsUpToDateWithCopernicusMarineCatalogDiv').style.color = glonetForecastsUpTodateWithCopernicusMarineCatalogTextColor;
+                          document.getElementById('glonetForecastsUpToDateWithCopernicusMarineCatalogDiv').style.backgroundColor = glonetForecastsUpTodateWithCopernicusMarineCatalogBackgroundColor;
                         })
                     })
                 })
