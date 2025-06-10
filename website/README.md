@@ -1,11 +1,19 @@
-# GLONET: Mercator's End-to-End Neural Forecasting System
+<div align="center">
+
+# GLONET
+
+**Mercator's End-to-End Neural Forecasting System**
+
+<img width="200" src="https://minio.dive.edito.eu/project-glonet/public/glonet_thumbnail.png" alt="logo of GLONET">
+
+</div>
 
 GLONET is:
-- A neural network-based ocean forecasting system developed by [Mercator Ocean international](https://www.mercator-ocean.eu/), which architecture is described in the [scientific paper](#publications) conducted as for of the [EDITO-ModelLab project](https://edito-modellab.eu/), outputting in seconds a 10-days daily forecasts of the temperature, sea surface height, salinity and currents at 1/4 degree resolution (1/12 degree effective resolution) over 21 depth levels.
+- A neural network-based ocean forecasting system developed by [Mercator Ocean international](https://www.mercator-ocean.eu/), which architecture is described in the [scientific paper](#publications), outputting in seconds a 10-days daily forecasts of the temperature, sea surface height, salinity and currents at 1/4 degree resolution (1/12 degree effective resolution) over 21 depth levels.
 - A port of the forecasting system on the European Digital Twin Ocean platform [EDITO](https://edito.eu) producing 10-days forecasts on a daily basis.
 - 10-days forecast data products discoverable and exploitable on the European Digital Twin Ocean.
 
-## Get started
+## Content
 
 [table of content](./_sidebar.md ':include')
 
