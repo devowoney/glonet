@@ -1,6 +1,7 @@
 - [Context and conception](#context-and-conception)
   - [Abstract](#abstract)
   - [Architecture](#architecture)
+  - [Effective resolution](#effective-resolution)
   - [Publications](#publications)
 - [Forecasts](#forecasts)
   - [Latest forecast](#latest-forecast)
