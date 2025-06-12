@@ -96,23 +96,23 @@ The forecast of the **last 15 days are kept in the EDITO data lake**, but foreca
 
 ### Latest forecast
 
-You can explore the latest forecast at **1/4 resolution** in [EDITO data explorer](https://my-ocean.dive.edito.eu/-/fia59e3gfn?tRelative=P10D&tStartOf=day).
+You can explore the latest forecast at **1/4 resolution** in [EDITO data explorer](https://my-ocean.dive.edito.eu/-/fia59e3gfn?tRelative=P1D&tStartOf=day).
 
 #### Currents
 
-<iframe src="https://my-ocean.dive.edito.eu/-/kjgy50v742?tRelative=P10D&tStartOf=day" width="100%" height="600px"></iframe>
+<iframe src="https://my-ocean.dive.edito.eu/-/kjgy50v742?tRelative=P1D&tStartOf=day" width="100%" height="600px"></iframe>
 
 #### Temperature
 
-<iframe src="https://my-ocean.dive.edito.eu/-/qtu46z9p9b?tRelative=P10D&tStartOf=day" width="100%" height="600px"></iframe>
+<iframe src="https://my-ocean.dive.edito.eu/-/qtu46z9p9b?tRelative=P1D&tStartOf=day" width="100%" height="600px"></iframe>
 
 #### Sea surface height
 
-<iframe src="https://my-ocean.dive.edito.eu/-/iqyb9xlbnb?tRelative=P10D&tStartOf=day" width="100%" height="600px"></iframe>
+<iframe src="https://my-ocean.dive.edito.eu/-/iqyb9xlbnb?tRelative=P1D&tStartOf=day" width="100%" height="600px"></iframe>
 
 #### Salinity
 
-<iframe src="https://my-ocean.dive.edito.eu/-/pfrsxptb9d?tRelative=P10D&tStartOf=day" width="100%" height="600px"></iframe>
+<iframe src="https://my-ocean.dive.edito.eu/-/pfrsxptb9d?tRelative=P1D&tStartOf=day" width="100%" height="600px"></iframe>
 
 ### All daily forecasts
 
