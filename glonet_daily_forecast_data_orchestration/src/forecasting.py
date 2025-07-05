@@ -1,5 +1,5 @@
 from get_inits import generate_initial_data
-from glonet_forecast import generate_forecast_file
+from glonet_forecast import create_forecast
 from model import synchronize_model_locally
 
 EDITO_BUCKET_NAME="project-da-ml"
@@ -14,11 +14,11 @@ def main() :
     local_dir = "../weight"
     synchronize_model_locally(local_dir=local_dir)
     
-    generate_forecast_file(bucket_name=EDITO_BUCKET_NAME, 
-                           forecast_netcdf_file_url=URL, 
-                           initial_file_1_url=cif1, 
-                           initial_file_2_url=cif2, 
-                           initial_file_3_url=cif3)
+    create_forecast(forecast_netcdf_file_url=URL, 
+                    model_dir=local_dir, 
+                    initial_file_1_url=cif1, 
+                    initial_file_2_url=cif2, 
+                    initial_file_3_url=cif3)
     
 if __name__ == "__main__" :
     main()
