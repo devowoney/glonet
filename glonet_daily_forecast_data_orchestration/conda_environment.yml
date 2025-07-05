@@ -12,6 +12,7 @@ dependencies:
   - numpy
   - pytorch
   - torchvision
+  - cudatoolkit
   - pillow
   - rioxarray
   - matplotlib
