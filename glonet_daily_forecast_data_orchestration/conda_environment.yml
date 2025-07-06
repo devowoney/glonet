@@ -12,6 +12,7 @@ dependencies:
   - zarr
   - numpy
   - pytorch
+  - pytorch-cuda
   - torchvision
   - pillow
   - rioxarray
