@@ -1,6 +1,7 @@
 name: glonet_daily_forecast_data_orchestration
 channels:
   - conda-forge
+  - pytorch
   - defaults
   - nvidia
 dependencies:
@@ -11,12 +12,13 @@ dependencies:
   - copernicusmarine
   - zarr
   - numpy
-  - pytorch
-  - pytorch-cuda
-  - torchvision
+  - pytorch-cuda=12.6
   - pillow
   - rioxarray
   - matplotlib
   - minio
   - cuda-toolkit
   - ipykernel
+  - pip :
+    - torch
+    - torchvision
