@@ -12,13 +12,13 @@ dependencies:
   - copernicusmarine
   - zarr
   - numpy
-  - pytorch-cuda=12.6
   - pillow
   - rioxarray
   - matplotlib
   - minio
-  - cuda-toolkit
+  - pytorch-cuda=12.4
+  - cuda-toolkit=12.4.1
   - ipykernel
   - pip :
-    - torch
-    - torchvision
+    - torch==2.7.1
+    - torchvision==0.22.1

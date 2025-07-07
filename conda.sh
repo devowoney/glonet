@@ -8,10 +8,10 @@ if [ ! -e "/home/onyxia/miniforge3/etc/profile.d/conda.sh" ]; then
 
     exec bash
 
-    rm -rf Miniforge3-$(uname)-$(uname -m).sh
-    bash conda.sh
-
 else
+
+    rm -rf Miniforge3-$(uname)-$(uname -m).sh
+
     source ~/miniforge3/etc/profile.d/conda.sh
     
     # Install pakages for glonet from env_yaml file 
