@@ -1,15 +1,19 @@
 #!/bin/bash
 
-if [ ! -e "/home/onyxia/miniforge3/etc/profile.d/conda.sh" ]; then
+if [ ! -e "/Odyssey/private/$USER/miniforge3/etc/profile.d/conda.sh" ]; then
 
     # Install minconda
     echo | curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
     bash Miniforge3-$(uname)-$(uname -m).sh
 
+    echo "-----Restart conda.sh"
+    ehco "     bash conda.sh     "
+    echo "-----Execute the command line above"       
     exec bash
 
 else
 
+    echo "Miniforge is already installed...moving to configuration conda env"
     rm -rf Miniforge3-$(uname)-$(uname -m).sh
 
     source ~/miniforge3/etc/profile.d/conda.sh
