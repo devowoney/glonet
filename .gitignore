@@ -1,3 +1,4 @@
 glonet_daily_forecast_data_orchestration/src/__pycache__/*
 TrainedWeights/*
 *.log
+glonet_daily_forecast_local/src/__pycahe__/*
