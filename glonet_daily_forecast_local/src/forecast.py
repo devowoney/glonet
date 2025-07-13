@@ -9,10 +9,13 @@ from torch.amp import autocast
 
 import torch
 
+import argparse
+from pathlib import Path
 
-MODEL_LOCATION = "/Odyssey/private/j25lee/glonet/TrainedWeights"
+MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 INPUT_LOCATION = "/Odyssey/public/glonet"
-OUTPUT_LOCATION = "/Odyssey/private/j25lee/woneydb"
+DEFAULT_OUTPUT_LOCATION = "/Odyssey/private/$USER/output_glonet"
+
 
 #####
 ## Forecast
@@ -186,7 +189,7 @@ def add_metadata(ds, date):
     }
     return ds
 
-def aforecast(d, date):
+def aforecast(d, date, cycle):
     from utility import get_denormalizer1, get_normalizer1
 
     denormalizer = get_denormalizer1(MODEL_LOCATION)
@@ -205,7 +208,7 @@ def aforecast(d, date):
     del data, nan_mask
     gc.collect()  # Force garbage collection
 
-    for i in range(1, 6):
+    for i in range(1, cycle / 2 + 1):
         print(i)
         model_inf = torch.jit.load(
             MODEL_LOCATION + "/" + "glonet_p1.pt"
@@ -236,7 +239,7 @@ def aforecast(d, date):
     gc.collect()
     return datasets
 
-def aforecast2(d, date):
+def aforecast2(d, date, cycle):
     from utility import get_denormalizer2, get_normalizer2
 
     denormalizer = get_denormalizer2(MODEL_LOCATION)
@@ -255,7 +258,7 @@ def aforecast2(d, date):
     del data, nan_mask
     gc.collect()  # Force garbage collection
 
-    for i in range(1, 6):
+    for i in range(1, cycle / 2 + 1):
         print(i)
         model_inf = torch.jit.load(
             MODEL_LOCATION + "/" + "glonet_p2.pt"
@@ -287,7 +290,7 @@ def aforecast2(d, date):
     return datasets
 
 
-def aforecast3(d, date):
+def aforecast3(d, date, cycle):
     from utility import get_denormalizer3, get_normalizer3
 
     denormalizer = get_denormalizer3(MODEL_LOCATION)
@@ -306,7 +309,7 @@ def aforecast3(d, date):
     del data, nan_mask
     gc.collect()  # Force garbage collection
 
-    for i in range(1, 6):
+    for i in range(1, cycle / 2 + 1):
         print(i)
         model_inf = torch.jit.load(
             MODEL_LOCATION + "/" + "glonet_p3.pt"
@@ -337,35 +340,36 @@ def aforecast3(d, date):
     gc.collect()
     return datasets
 
-def create_forecast(day_string :str,
-) -> xr.Dataset:
+def create_forecast(init_date : str,
+                    forecast_cycle : int, 
+                    output_path : str = None) -> xr.Dataset :
     
-    date = datetime.strptime(day_string, "%Y-%m-%d").date()
+    date = datetime.strptime(init_date, "%Y-%m-%d").date()
 
     start_datetime = str(date - timedelta(days=1))
     end_datetime = str(date)
     print(
-        f"Creating {day_string} forecast from {start_datetime} to {end_datetime}..."
+        f"Creating {init_date} forecast from {start_datetime} to {end_datetime}..."
     )
 
     start_timed = time.time()
-    rdata1 = xr.open_dataset(INPUT_LOCATION + f"/{day_string}_init_states/input1.nc"
+    rdata1 = xr.open_dataset(INPUT_LOCATION + f"/{init_date}_init_states/input1.nc"
     )
-    rdata2 = xr.open_dataset(INPUT_LOCATION + f"/{day_string}_init_states/input2.nc"
+    rdata2 = xr.open_dataset(INPUT_LOCATION + f"/{init_date}_init_states/input2.nc"
     )
-    rdata3 = xr.open_dataset(INPUT_LOCATION + f"/{day_string}_init_states/input3.nc"
+    rdata3 = xr.open_dataset(INPUT_LOCATION + f"/{init_date}_init_states/input3.nc"
     )
     end_timed = time.time()
     execution_timed = end_timed - start_timed
 
     start_time = time.time()
-    ds1 = aforecast(rdata1, date - timedelta(days=1))
+    ds1 = aforecast(rdata1, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata1
     gc.collect()
-    ds2 = aforecast2(rdata2, date - timedelta(days=1))
+    ds2 = aforecast2(rdata2, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata2
     gc.collect()
-    ds3 = aforecast3(rdata3, date - timedelta(days=1))
+    ds3 = aforecast3(rdata3, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata3
     gc.collect()
     end_time = time.time()
@@ -386,19 +390,60 @@ def create_forecast(day_string :str,
     del combined1, combined2, combined3
     gc.collect()
 
-    output_dir = OUTPUT_LOCATION + "/glonet_out"
-    os.makedirs(output_dir, exist_ok=True)
-    combined4.to_netcdf(f"{output_dir}/forecast_10days_from_{date}.nc")
+    # Write output NetCDF file
+    if output_path :
+        out_path = output_path
+    else : 
+        out_path = DEFAULT_OUTPUT_LOCATION
+         
+    os.makedirs(out_path, exist_ok=True)
+    combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}.nc")
     
     return combined4
+
+def parse_args() :
+    
+    parser = argparse.ArgumentParser(
+        discription="GLONET forecast - return ocean state of each day during its forecast cycle.")
+    
+    parser.add_argument(
+        dest="input_date",
+        type=str,
+        required=True,
+        help=""
+    )
+    
+    parser.add_argument(
+        dest="forecast_cycle",
+        type=str,
+        required=True,
+        help="Define forecast cycle of GLONET. ex) 7 for 7-days forecast"
+    )
+    
+    parser.add_argument(
+        "-o", "--output",
+        dest="output_path",
+        type=Path,
+        required=False,
+        help="Path to save output file. If output is not given by terminal input, the output will be saved in default location"
+    )
+
+
 
 def main() :
     if len(sys.argv) != 2:
         print("Usage: python forecast.py <date : %Y-%m-%d> ex) 2025-05-17")
         return
     
-    input_date = sys.argv[1]
-    create_forecast(input_date)
+    args = parse_args()
+    
+    input_date = args.input_date
+    forecast_cycle = args.forecast_cycle
+    output_path = args.output_path
+    
+    create_forecast(init_date=input_date, 
+                    forecast_cycle=forecast_cycle, 
+                    output_path=output_path)
 
 if __name__ == "__main__":
     main()

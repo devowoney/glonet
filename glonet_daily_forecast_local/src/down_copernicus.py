@@ -7,17 +7,16 @@ import gc
 from xesmf import Regridder
 import os
 import sys
-
-
-
-
-MODEL_LOCATION="/Odyssey/private/j25lee/glonet/TrainedWeights"
+import argparse
+from pathlib import Path
 
 #####
 ## Get Initial Condition from Copernicus Marine #
 #####
-MODEL_LOCATION = "/Odyssey/private/j25lee/glonet/TrainedWeights"
-OUTPUT_LOCATION = "/Odyssey/public/glonet"
+
+MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
+DEFAULT_OUTPUT_LOCATION = "/Odyssey/public/glonet"
+
 def get_data(date, depth, fn):
     start_datetime = str(date - timedelta(days=1))
     end_datetime = str(date)
@@ -103,7 +102,7 @@ def glo_in2(date):
 
 
 def glo_in3(date):
-    depth_list = [902, 1245, 1684, 2225, 3220, 3597, 3992, 4405, 4405, 5274]
+    depth_list = [902, 1245, 1684, 2225, 3220, 3597, 3992, 4405, 4833, 5274]
     inp = []
     for i in depth_list :
         inp.append(get_data(date, i, f"{MODEL_LOCATION}/xe_weights14/L{i}.nc"))
@@ -142,33 +141,62 @@ def create_data(ds_out, depth):
 
 def create_depth_data(date: date, glo_in, depth: int):
     dd = glo_in(date)
+    
     return create_data(dd, depth)
 
 
-def create_init_states_data(target_date: str) :
+def create_init_states_data(target_date : str, 
+                            output_path : str = None) :
     date = datetime.strptime(target_date, "%Y-%m-%d")
+    
     function_map = {
         "1" : glo_in1,
         "2" : glo_in2,
         "3" : glo_in3
     }
     
-    output_dir = OUTPUT_LOCATION + f"/{target_date}_init_states"
-    os.makedirs(output_dir, exist_ok=True)
+    # Write output file
+    if output_path :
+        out_location = output_path
+    else :
+        out_location = DEFAULT_OUTPUT_LOCATION + f"/{target_date}_init_states"
+    
+    os.makedirs(out_location, exist_ok=True)
+    
     for i in ["1", "2", "3"] :
         dataset = create_depth_data(date, function_map[i], int(i) - 1)
-        dataset.to_netcdf(f"{output_dir}/input{int(i)}.nc")
+        dataset.to_netcdf(f"{out_location}/input{int(i)}.nc")
     return dataset   
 
-
+# Parseargs setting
+def parse_args () :
+    parser = argparse.ArgumentParser(
+        description="Download Copernicus Marine product data."
+    )
+    parser.add_argument(
+        dest="input_date",
+        type=str,
+        required=True,
+        help="Input : a date to download copernicus marine data."
+    )
+    parser.add_argument(
+        "-o", "--output",
+        dest="output_path",
+        type=Path,
+        required=False,
+        help="Path to save output file. If output is not given by terminal input, the output will be saved in default location"
+    )
+    
+    return parser.parse_args()
 
 def main() :
-    if len(sys.argv) != 2:
-        print("Usage: python forecast.py <date : %Y-%m-%d> ex) 2025-05-17")
-        return
     
-    input_date = sys.argv[1]
-    create_init_states_data(input_date)
+    args = parse_args()
+
+    input_date = args.input_date
+    output_path = args.output_path
+    create_init_states_data(target_date=input_date, 
+                            output_path=output_path)
 
 if __name__ == "__main__":
     main()
