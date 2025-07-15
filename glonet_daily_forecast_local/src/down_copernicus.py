@@ -166,6 +166,9 @@ def create_init_states_data(target_date : str,
     for i in ["1", "2", "3"] :
         dataset = create_depth_data(date, function_map[i], int(i) - 1)
         dataset.to_netcdf(f"{out_location}/input{int(i)}.nc")
+        
+    print(f"Copernicus Marine data is completely downloaded in < {out_location} >")
+    
     return dataset   
 
 # Parseargs setting
@@ -176,8 +179,7 @@ def parse_args () :
     parser.add_argument(
         dest="input_date",
         type=str,
-        required=True,
-        help="Input : a date to download copernicus marine data."
+        help="Input : a date to download copernicus marine data. Format : yyyy-mm-dd"
     )
     parser.add_argument(
         "-o", "--output",

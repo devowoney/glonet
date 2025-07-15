@@ -1,6 +1,7 @@
 import xarray as xr
 import numpy as np
 import os
+from datetime import datetime, timedelta
 
 import argparse
 import sys
@@ -19,14 +20,14 @@ def reshapeDataset(in_ds : xr.Dataset) -> xr.Dataset:
     out_ds = (in_ds.to_array(dim = "variable")                              # Convert to xarray DatArray
                     .stack(ch=("variable", "depth"))                        # Merge two dimensions one dimension "ch"
                     .reset_index("ch", drop=True)                           # Clear void coordinates 
-                    .assign_coords(ch=np.arange(len(in_ds.variables) * in_ds.sizes["depth"])) # define values of ch 
+                    .assign_coords(ch=np.arange(len(in_ds.data_vars) * in_ds.sizes["depth"])) # define values of ch 
                     .transpose("time", "ch", "latitude", "longitude")       # Reshape in order
                     .rename({"latitude" : "lat", "longitude" : "lon"})      # Rename into input Dataset config
-                    .to_dataset)                                            # Reconvert to Dataset
+                    .to_dataset(name="data"))                                            # Reconvert to Datase
         
     return out_ds
 
-# Divide forcast NetCDF file in to 3 files by states depth
+# Divide forcast NetCDF file in to 3 files by states depth.
 def makeThreeInput(input_nc : str, 
                     cycle : int,
                     output_path : str = None) -> list[xr.Dataset] :
@@ -38,18 +39,31 @@ def makeThreeInput(input_nc : str,
     It is NOT same as the cycle of the forecast python script. And of course, this cycle should be smaller than forecast cycle
     """
     
-    # Extract date for output name
+    # Extract date.
+    init_date = xr.open_dataset(input_nc)["time"].dt.date.values[0] - timedelta(days=1)
     forecast_date = xr.open_dataset(input_nc)["time"].dt.date.values[cycle - 1]
     
-    # Read netCDF file and pick only two last timeset
+    # terminate Script if output file is already exist.
+    if output_path :
+        out_path = output_path + f"/{forecast_date}_init_from_{init_date}"
+    else : 
+        out_path = DEFAULT_OUTPUT_LOCATION + f"/{forecast_date}_init_from_{init_date}"
+    
+    path_check = Path(out_path)
+    if path_check.exists() :
+        print(f"File is alreday exist in {path_check}")
+        return
+    
+    # Read netCDF file and pick only two last timeset.
+    print(f"Read <{input_nc}> Netcdf file...")
     last_two_day_forecast = xr.open_dataset(input_nc).isel(time = [cycle-2, cycle-1])
     
-    # Slice datatset by depth first 
-    surface = last_two_day_forecast.isel(depth = 0, missing_dims = "ignore")
-    deep = last_two_day_forecast.sel(depth = slice(40, 800))
-    deeper = last_two_day_forecast.sel(depth = slice(900, 5500))
+    # Slice datatset by depth.
+    surface = last_two_day_forecast.sel(depth = slice(0, 30))
+    deep = last_two_day_forecast.sel(depth = slice(40, 800)).drop_vars(["zos"])
+    deeper = last_two_day_forecast.sel(depth = slice(900, 5500)).drop_vars(["zos"])
     
-    # Make a dictionary for iterattion
+    # Make a dictionary for iterattion.
     ds_map = {
             "1" : surface,
             "2" : deep,
@@ -57,38 +71,37 @@ def makeThreeInput(input_nc : str,
     }
     
     # Write output NetCDF file.
-    if output_path :
-        out_path = output_path
-    else : 
-        out_path = DEFAULT_OUTPUT_LOCATION
-    
+    print(f"Writing input files...")
     os.makedirs(out_path, exist_ok=True)
-    
+
     # initialize a list
     in123 = []
         
-    for i in ds_map :
-        in123.append(i)
-        i.to_netcdf(f"{out_path}/{forecast_date}_autoregress_init_states")
-        
+    for i in ["1", "2", "3"] :
+        converted = reshapeDataset(ds_map[i])
+        in123.append(converted)
+        converted.to_netcdf(f"{out_path}/input{i}.nc")
+        print(f"input{i}.nc is done")
+    
+    print(f"Converted data is saved in < {out_path} >")
     return in123
 
-# Parseargs setting
+# Parseargs setting.
 def parse_args () :
     parser = argparse.ArgumentParser(
-        description="Process some data and write to an output path."
+        description="Process forecast NetCDF from GLONET and write into input format."
     )
+    
     parser.add_argument(
-        dest = "input_path",
+        dest = "input_file",
         type = Path,
-        required = True,
-        help = "Input of the function : NetCDF format file."
+        help = "GLONET forecast NetCDF format file."
     )
+    
     parser.add_argument(
         dest = "autoregress_cycle",
-        type = str,
-        required = True,
-        help = """Autoregression cyle to extract last day forecast. 
+        type = int,
+        help = """Autoregression cycle to extract last day forecast.
         It can be different with forecast cycle. But make sure that the cycle should be smaller than the forecast cycle.
         """
     )
@@ -97,7 +110,7 @@ def parse_args () :
         "-o", "--output",
         dest = "output_path",
         type = Path,
-        required = False,
+        required=False,
         help = "Path to save output file. If output is not given by terminal input, the output will be saved in default location"
     )
     
@@ -109,7 +122,7 @@ def main() :
 
     args = parse_args()
     
-    input_file = args.input_path
+    input_file = args.input_file
     autoregress_cycle = args.autoregress_cycle
     output_path = args.output_path
     
