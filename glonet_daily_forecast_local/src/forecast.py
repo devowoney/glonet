@@ -15,7 +15,7 @@ from pathlib import Path
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 INPUT_LOCATION = "/Odyssey/public/glonet"
 user = os.environ.get("USER")
-DEFAULT_OUTPUT_LOCATION = f"/Odyssey/private/{user}/output_glonet"
+DEFAULT_OUTPUT_LOCATION = f"/Odyssey/private/{user}/glonet"
 
 
 #####
