@@ -340,6 +340,42 @@ def aforecast3(d, date, cycle):
     gc.collect()
     return datasets
 
+def putHotSpot(ds : xr.Dataset) -> xr.Dataset :
+    """_summary_
+
+    Args:
+        input_ds (xr.Dataset): Input Dataset containing the data to be processed.
+
+    Returns:
+        xr.Dataset: HotSpoted Dataset. 1 in hotspot area, 0 in non-hotspot area.
+    """    
+    # Gulf Stream
+    gs_lat = (ds.lat  >= 20) & (ds.lat  <= 50)
+    gs_lon = (ds.lon  >= -80) & (ds.lon  <= -40)
+
+    # Angulas
+    ang_lat = (ds.lat  >= -40) & (ds.lat  <= -10)
+    ang_lon = (ds.lon  >= 20) & (ds.lon  <= 60)
+
+    # Kuroshima
+    ku_lat = (ds.lat  >= 20) & (ds.lat  <= 50)
+    ku_lon = (ds.lon  >= 130) & (ds.lon  <= 170)
+
+    mask_gs    = gs_lat    & gs_lon
+    mask_ang   = ang_lat   & ang_lon
+    mask_kuro  = ku_lat    & ku_lon
+    
+    # Start with zeros
+    region_mask = xr.zeros_like(ds, dtype=int)
+
+    region_mask = region_mask.where(~mask_gs,   other=1)
+    region_mask = region_mask.where(~mask_ang,  other=1)
+    region_mask = region_mask.where(~mask_kuro, other=1)
+    
+    hotspot = region_mask.where(ds.notnull(), other=np.nan)
+    
+    return hotspot
+
 def create_forecast(init_dir : Path,
                     forecast_cycle : int = None, 
                     output_path : Path = None) -> xr.Dataset :
@@ -364,6 +400,20 @@ def create_forecast(init_dir : Path,
     rdata1 = xr.open_dataset(f"{init_dir}/input1.nc")
     rdata2 = xr.open_dataset(f"{init_dir}/input2.nc")
     rdata3 = xr.open_dataset(f"{init_dir}/input3.nc")
+
+    # Apply putHotSpot only for time=0, keep original for time=1
+    hotspot1_first = putHotSpot(rdata1.isel(time=0))
+    hotspot1_second = rdata1.isel(time=1)
+    hotspot1 = xr.concat([hotspot1_first, hotspot1_second], dim="time")
+
+    hotspot2_first = putHotSpot(rdata2.isel(time=0))
+    hotspot2_second = rdata2.isel(time=1)
+    hotspot2 = xr.concat([hotspot2_first, hotspot2_second], dim="time")
+
+    hotspot3_first = putHotSpot(rdata3.isel(time=0))
+    hotspot3_second = rdata3.isel(time=1)
+    hotspot3 = xr.concat([hotspot3_first, hotspot3_second], dim="time")
+
     end_timed = time.time()
     execution_timed = end_timed - start_timed
     start_time = time.time()
@@ -371,14 +421,14 @@ def create_forecast(init_dir : Path,
         forecast_cycle = forecast_cycle
     else : 
         forecast_cycle = 7
-    
-    ds1 = aforecast(rdata1, date - timedelta(days=1), cycle=forecast_cycle)
+
+    ds1 = aforecast(hotspot1, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata1
     gc.collect()
-    ds2 = aforecast2(rdata2, date - timedelta(days=1), cycle=forecast_cycle)
+    ds2 = aforecast2(hotspot2, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata2
     gc.collect()
-    ds3 = aforecast3(rdata3, date - timedelta(days=1), cycle=forecast_cycle)
+    ds3 = aforecast3(hotspot3, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata3
     gc.collect()
     end_time = time.time()
@@ -407,17 +457,17 @@ def create_forecast(init_dir : Path,
          
     os.makedirs(out_path, exist_ok=True)
     if not is_from_glonet_out :
-        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}_hotspot.nc")
     else :
-        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}.nc")
-        
+        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}_hotspot.nc")
+
     print(f"Forecast by GLONET completed : output saved in < {out_path} >")
     
     return combined4
 
 def parse_args ():
     parser = argparse.ArgumentParser(
-        description="GLONET forecast - forecast ocean states of each day during its forecast cycle."
+        description="GLONET forecast - generate forecast ocean states from [hotspoted condition]."
     )
     
     parser.add_argument(

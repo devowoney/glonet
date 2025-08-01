@@ -339,6 +339,48 @@ def aforecast3(d, date, cycle):
     )
     gc.collect()
     return datasets
+    
+def addRandomNoise(input_ds : xr.Dataset,
+                   seed : int = 42) -> xr.Dataset :
+    """_summary_
+
+    Sigma value is calulated automatically by the mean of each channel. \n
+    Each mean value is divided by 30 to get the standard deviation of the Gaussian noise.
+    Max error (3 * sigma) is about 10% of the mean value.
+    
+    Args:
+        input_ds (xr.Dataset): Input Dataset to which noise will be added.
+        seed (int, optional): Seed for the random number generator. Defaults to None.
+
+    Returns:
+        xr.Dataset: Dataset with added Gaussian noise.
+    """
+
+    # Chunk input Dataset
+    input_ds = input_ds.chunk(200)
+    
+    # initialize random noise generater
+    rng = np.random.default_rng(seed)
+
+    # Put noise by channel, preserving the original variable name and dataset structure
+    arr = input_ds[list(input_ds.data_vars)[0]]
+    noised_arrs = []
+    
+    for i in range(arr.sizes['ch']):
+        ch_arr = arr.isel(ch=i)
+        mean = ch_arr.mean().compute().item()
+        noise = xr.DataArray(
+            rng.normal(loc=0, scale=abs(float(mean/30)), size=ch_arr.shape),
+            dims=ch_arr.dims,
+            coords=ch_arr.coords
+        )
+        noised_arrs.append((ch_arr + noise).compute())
+        
+    noised = xr.concat(noised_arrs, dim='ch')
+    noised = noised.transpose('time', 'ch', 'lat', 'lon')
+    
+    # Return dataset with variable name 'data'
+    return xr.Dataset({'data': noised})
 
 def create_forecast(init_dir : Path,
                     forecast_cycle : int = None, 
@@ -364,6 +406,9 @@ def create_forecast(init_dir : Path,
     rdata1 = xr.open_dataset(f"{init_dir}/input1.nc")
     rdata2 = xr.open_dataset(f"{init_dir}/input2.nc")
     rdata3 = xr.open_dataset(f"{init_dir}/input3.nc")
+    zicdata1 = addRandomNoise(rdata1)
+    zicdata2 = addRandomNoise(rdata2)
+    zicdata3 = addRandomNoise(rdata3)
     end_timed = time.time()
     execution_timed = end_timed - start_timed
     start_time = time.time()
@@ -372,13 +417,13 @@ def create_forecast(init_dir : Path,
     else : 
         forecast_cycle = 7
     
-    ds1 = aforecast(rdata1, date - timedelta(days=1), cycle=forecast_cycle)
+    ds1 = aforecast(zicdata1, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata1
     gc.collect()
-    ds2 = aforecast2(rdata2, date - timedelta(days=1), cycle=forecast_cycle)
+    ds2 = aforecast2(zicdata2, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata2
     gc.collect()
-    ds3 = aforecast3(rdata3, date - timedelta(days=1), cycle=forecast_cycle)
+    ds3 = aforecast3(zicdata3, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata3
     gc.collect()
     end_time = time.time()
@@ -407,17 +452,17 @@ def create_forecast(init_dir : Path,
          
     os.makedirs(out_path, exist_ok=True)
     if not is_from_glonet_out :
-        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}_noise.nc")
     else :
-        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}.nc")
-        
+        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}_noise.nc")
+
     print(f"Forecast by GLONET completed : output saved in < {out_path} >")
     
     return combined4
 
 def parse_args ():
     parser = argparse.ArgumentParser(
-        description="GLONET forecast - forecast ocean states of each day during its forecast cycle."
+        description="GLONET forecast - generate forecast ocean states with [Normal Gaussian Random Noise]."
     )
     
     parser.add_argument(
