@@ -344,7 +344,8 @@ def create_forecast(init_dir : Path,
                     forecast_cycle : int = None, 
                     output_path : Path = None) -> xr.Dataset :
     # Extract string date
-    init_date = str(init_dir).split("_init_", 1)[0].rsplit("/", 1)[1]
+    init_date = str(init_dir).split("_init_avg_states_to_", 1)[0].rsplit("/", 1)[1]
+    init_date2 = str(init_dir).split("_init_avg_states_to_", 1)[1]
     
     # Detect wether the forecast is from GLORYS12 or GLONET forecast states.
     if str(init_dir).split("_init_", 1)[1].split("_")[0] == "from" :
@@ -352,12 +353,12 @@ def create_forecast(init_dir : Path,
     else :
         is_from_glonet_out = False
         
-    date = datetime.strptime(init_date, "%Y-%m-%d").date()
+    date = datetime.strptime(init_date2, "%Y-%m-%d").date()
 
     start_datetime = str(date - timedelta(days=1))
     end_datetime = str(date)
     print(
-        f"Creating {init_date} forecast from {start_datetime} to {end_datetime}..."
+        f"Creating {init_date2} avg forecast from {start_datetime} to {end_datetime}..."
     )
 
     start_timed = time.time()
@@ -370,7 +371,7 @@ def create_forecast(init_dir : Path,
     if forecast_cycle :
         forecast_cycle = forecast_cycle
     else : 
-        forecast_cycle = 7
+        forecast_cycle = 1
     
     ds1 = aforecast(rdata1, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata1
@@ -407,9 +408,9 @@ def create_forecast(init_dir : Path,
          
     os.makedirs(out_path, exist_ok=True)
     if not is_from_glonet_out :
-        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/forecast_avg_from_{init_date}_to_{init_date2}.nc")
     else :
-        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/repeated_forecast_avg_from_{init_date}_to_{init_date2}.nc")
         
     print(f"Forecast by GLONET completed : output saved in < {out_path} >")
     
@@ -417,7 +418,7 @@ def create_forecast(init_dir : Path,
 
 def parse_args ():
     parser = argparse.ArgumentParser(
-        description="GLONET forecast - forecast ocean states of each day during its forecast cycle."
+        description="GLONET forecast - forecast of mean ocean states."
     )
     
     parser.add_argument(

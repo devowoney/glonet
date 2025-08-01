@@ -364,6 +364,10 @@ def create_forecast(init_dir : Path,
     rdata1 = xr.open_dataset(f"{init_dir}/input1.nc")
     rdata2 = xr.open_dataset(f"{init_dir}/input2.nc")
     rdata3 = xr.open_dataset(f"{init_dir}/input3.nc")
+    # Apply mask only to the first time slice, keep the second unchanged
+    zicdata1 = rdata1.where(np.isnan(rdata1), other=0)
+    zicdata2 = rdata2.where(np.isnan(rdata2), other=0)
+    zicdata3 = rdata3.where(np.isnan(rdata3), other=0)
     end_timed = time.time()
     execution_timed = end_timed - start_timed
     start_time = time.time()
@@ -372,13 +376,13 @@ def create_forecast(init_dir : Path,
     else : 
         forecast_cycle = 7
     
-    ds1 = aforecast(rdata1, date - timedelta(days=1), cycle=forecast_cycle)
+    ds1 = aforecast(zicdata1, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata1
     gc.collect()
-    ds2 = aforecast2(rdata2, date - timedelta(days=1), cycle=forecast_cycle)
+    ds2 = aforecast2(zicdata2, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata2
     gc.collect()
-    ds3 = aforecast3(rdata3, date - timedelta(days=1), cycle=forecast_cycle)
+    ds3 = aforecast3(zicdata3, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata3
     gc.collect()
     end_time = time.time()
@@ -407,9 +411,9 @@ def create_forecast(init_dir : Path,
          
     os.makedirs(out_path, exist_ok=True)
     if not is_from_glonet_out :
-        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}_zic_all.nc")
     else :
-        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}_zic_all.nc")
         
     print(f"Forecast by GLONET completed : output saved in < {out_path} >")
     
@@ -417,7 +421,7 @@ def create_forecast(init_dir : Path,
 
 def parse_args ():
     parser = argparse.ArgumentParser(
-        description="GLONET forecast - forecast ocean states of each day during its forecast cycle."
+        description="GLONET forecast - generate forecast ocean states from [zero initial condition] ."
     )
     
     parser.add_argument(
