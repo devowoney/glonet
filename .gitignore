@@ -1,4 +1,9 @@
 glonet_daily_forecast_data_orchestration/src/__pycache__/
+glonet_daily_forecast_local/src/*.sh
+glonet_daily_forecast_local/src/*.ipynb
 TrainedWeights/
 *.log
 glonet_daily_forecast_local/src/__pycahe__/
+tmp.ipynb
+output/
+sb_*.sh

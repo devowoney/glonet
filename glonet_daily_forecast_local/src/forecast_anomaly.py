@@ -341,6 +341,7 @@ def aforecast3(d, date, cycle):
     return datasets
 
 def create_forecast(init_dir : Path,
+                    mean_dir : Path,
                     forecast_cycle : int = None, 
                     output_path : Path = None) -> xr.Dataset :
     # Extract string date
@@ -357,13 +358,22 @@ def create_forecast(init_dir : Path,
     start_datetime = str(date - timedelta(days=1))
     end_datetime = str(date)
     print(
-        f"Creating {init_date} forecast from {start_datetime} to {end_datetime}..."
+        f"Creating {init_date} avg forecast from {start_datetime} to {end_datetime}..."
     )
 
     start_timed = time.time()
-    rdata1 = xr.open_dataset(f"{init_dir}/input1.nc")
-    rdata2 = xr.open_dataset(f"{init_dir}/input2.nc")
-    rdata3 = xr.open_dataset(f"{init_dir}/input3.nc")
+    idata1 = xr.open_dataset(f"{init_dir}/input1.nc")
+    idata2 = xr.open_dataset(f"{init_dir}/input2.nc")
+    idata3 = xr.open_dataset(f"{init_dir}/input3.nc")
+    
+    mdata1 = xr.open_dataset(f"{mean_dir}/input1.nc")
+    mdata2 = xr.open_dataset(f"{mean_dir}/input2.nc")
+    mdata3 = xr.open_dataset(f"{mean_dir}/input3.nc")
+
+    rdata1 = idata1 - mdata1.isel(time=0)
+    rdata2 = idata2 - mdata2.isel(time=0)
+    rdata3 = idata3 - mdata3.isel(time=0)
+
     end_timed = time.time()
     execution_timed = end_timed - start_timed
     start_time = time.time()
@@ -407,23 +417,30 @@ def create_forecast(init_dir : Path,
          
     os.makedirs(out_path, exist_ok=True)
     if not is_from_glonet_out :
-        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}_anomaly.nc")
     else :
-        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}.nc")
-        
+        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}_anomaly.nc")
+
     print(f"Forecast by GLONET completed : output saved in < {out_path} >")
     
     return combined4
 
 def parse_args ():
     parser = argparse.ArgumentParser(
-        description="GLONET forecast - forecast ocean states of each day during its forecast cycle."
+        description="GLONET forecast - anomaly forecast of ocean states."
     )
     
     parser.add_argument(
         dest="input_path",
         type=Path,
-        help="Input directory which has three initial input files."
+        help="Original input directory which has three initial input files."
+                "<input1.nc, input2.nc, input3.nc> must be concluded in input directory."
+    )
+
+    parser.add_argument(
+        dest="mean_path",
+        type=Path,
+        help="Mean input directory which has three initial input files."
                 "<input1.nc, input2.nc, input3.nc> must be concluded in input directory."
     )
     
@@ -452,10 +469,12 @@ def main() :
     args = parse_args()
     
     input_path = args.input_path
+    mean_path = args.mean_path
     forecast_cycle = args.forecast_cycle
     output_path = args.output_path
     
-    create_forecast(init_dir=input_path, 
+    create_forecast(init_dir=input_path,
+                    mean_dir=mean_path,
                     forecast_cycle=forecast_cycle, 
                     output_path=output_path)
 

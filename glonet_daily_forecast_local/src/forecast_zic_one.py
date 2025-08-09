@@ -364,6 +364,20 @@ def create_forecast(init_dir : Path,
     rdata1 = xr.open_dataset(f"{init_dir}/input1.nc")
     rdata2 = xr.open_dataset(f"{init_dir}/input2.nc")
     rdata3 = xr.open_dataset(f"{init_dir}/input3.nc")
+    
+    # Apply mask only to the first time slice, keep the second unchanged
+    zicdata1_first = rdata1.isel(time=0).where(np.isnan(rdata1.isel(time=0)), other=0)
+    zicdata1_second = rdata1.isel(time=1)
+    zicdata1 = xr.concat([zicdata1_first, zicdata1_second], dim="time")
+
+    zicdata2_first = rdata2.isel(time=0).where(np.isnan(rdata2.isel(time=0)), other=0)
+    zicdata2_second = rdata2.isel(time=1)
+    zicdata2 = xr.concat([zicdata2_first, zicdata2_second], dim="time")
+
+    zicdata3_first = rdata3.isel(time=0).where(np.isnan(rdata3.isel(time=0)), other=0)
+    zicdata3_second = rdata3.isel(time=1)
+    zicdata3 = xr.concat([zicdata3_first, zicdata3_second], dim="time")
+
     end_timed = time.time()
     execution_timed = end_timed - start_timed
     start_time = time.time()
@@ -372,13 +386,13 @@ def create_forecast(init_dir : Path,
     else : 
         forecast_cycle = 7
     
-    ds1 = aforecast(rdata1, date - timedelta(days=1), cycle=forecast_cycle)
+    ds1 = aforecast(zicdata1, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata1
     gc.collect()
-    ds2 = aforecast2(rdata2, date - timedelta(days=1), cycle=forecast_cycle)
+    ds2 = aforecast2(zicdata2, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata2
     gc.collect()
-    ds3 = aforecast3(rdata3, date - timedelta(days=1), cycle=forecast_cycle)
+    ds3 = aforecast3(zicdata3, date - timedelta(days=1), cycle=forecast_cycle)
     del rdata3
     gc.collect()
     end_time = time.time()
@@ -407,17 +421,17 @@ def create_forecast(init_dir : Path,
          
     os.makedirs(out_path, exist_ok=True)
     if not is_from_glonet_out :
-        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}_zic_one.nc")
     else :
-        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}.nc")
-        
+        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}_zic_one.nc")
+
     print(f"Forecast by GLONET completed : output saved in < {out_path} >")
     
     return combined4
 
 def parse_args ():
     parser = argparse.ArgumentParser(
-        description="GLONET forecast - forecast ocean states of each day during its forecast cycle."
+        description="GLONET forecast - generate forecast ocean states from [zero initial condition] ."
     )
     
     parser.add_argument(
