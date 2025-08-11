@@ -1,0 +1,17 @@
+# @package _global_
+# Quick test experiment
+defaults:
+  - /model: glonet_small
+  - /training: fast
+  - /data: default
+  - override /hydra/job_logging: colorlog
+  
+experiment_name: "quick_test"
+seed: 123
+
+# Override some settings for quick testing
+training:
+  epochs: 5
+  batch_size: 1
+  
+output_dir: "outputs/quick_test"

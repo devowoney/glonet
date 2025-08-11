@@ -1,0 +1,26 @@
+# GLONET Model Configuration
+_target_: src.glonet.Glonet
+
+# Model dimensions
+dim: [2, 5, 128, 128]  # [T, C, H, W] - Time, Channels, Height, Width
+
+# Architecture parameters
+dT: 64              # Temporal dimension
+dS: 64              # Spatial dimension  
+NT: 2               # Number of temporal layers
+NS: 8               # Number of spatial layers
+ker: [3, 5, 7]      # Kernel sizes for inception blocks
+groups: 8           # Number of groups for convolutions
+
+# Sub-module configurations
+space:
+  channel_hid: 64
+  N_T: 8
+  
+dynamics:
+  n_heads: 4
+  patch_size: [16, 16]
+  
+maps:
+  C_hid: 64
+  N_S: 2
