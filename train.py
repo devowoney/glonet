@@ -11,6 +11,7 @@ from typing import Any, Dict
 
 import torch
 import torch.nn as nn
+import torch.utils.data
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
@@ -22,6 +23,7 @@ from glonet import Glonet
 from blocks import *
 from NN import *
 from NO import *
+from dataset import XrDataset, create_xr_datasets
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -80,7 +82,8 @@ class GlonetTrainer:
             NT=NT,
             NS=NS,
             ker=ker,
-            groups=groups
+            groups=groups,
+            device=self.device.type
         )
         
         return model.to(self.device)
@@ -216,6 +219,57 @@ class GlonetTrainer:
         return self.best_val_loss
 
 
+def create_data_loaders(cfg) -> tuple:
+    """Create data loaders using XrDataset"""
+    try:
+        # Create datasets using the new XrDataset class
+        train_dataset, val_dataset, test_dataset = create_xr_datasets(cfg)
+        
+        # Create data loaders
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=cfg.training.batch_size,
+            shuffle=True,
+            num_workers=cfg.data.num_workers,
+            pin_memory=cfg.data.pin_memory,
+            drop_last=True
+        )
+        
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset,
+            batch_size=cfg.training.batch_size,
+            shuffle=False,
+            num_workers=cfg.data.num_workers,
+            pin_memory=cfg.data.pin_memory,
+            drop_last=False
+        )
+        
+        test_loader = torch.utils.data.DataLoader(
+            test_dataset,
+            batch_size=cfg.training.batch_size,
+            shuffle=False,
+            num_workers=cfg.data.num_workers,
+            pin_memory=cfg.data.pin_memory,
+            drop_last=False
+        )
+        
+        log.info(f"Created data loaders - Train batches: {len(train_loader)}, "
+                f"Val batches: {len(val_loader)}, Test batches: {len(test_loader)}")
+        
+        return train_loader, val_loader, test_loader
+        
+    except Exception as e:
+        log.warning(f"Failed to create XrDataset: {e}")
+        log.info("Falling back to dummy data loader...")
+        
+        # Fallback to dummy data if XrDataset fails
+        train_loader = create_dummy_data_loader(cfg, 'train')
+        val_loader = create_dummy_data_loader(cfg, 'val')
+        test_loader = create_dummy_data_loader(cfg, 'test')
+        
+        return train_loader, val_loader, test_loader
+
+
 def create_dummy_data_loader(cfg: DictConfig, split: str = 'train'):
     """Create a dummy data loader for demonstration"""
     # This is a placeholder - replace with your actual data loading logic
@@ -261,10 +315,9 @@ def main(cfg: DictConfig) -> float:
     # Create trainer
     trainer = GlonetTrainer(cfg)
     
-    # Create data loaders (replace with your actual data loading)
+    # Create data loaders
     log.info("Creating data loaders...")
-    train_loader = create_dummy_data_loader(cfg, 'train')
-    val_loader = create_dummy_data_loader(cfg, 'val')
+    train_loader, val_loader, test_loader = create_data_loaders(cfg)
     
     # Train the model
     best_val_loss = trainer.train(train_loader, val_loader)

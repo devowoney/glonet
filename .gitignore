@@ -7,3 +7,6 @@ glonet_daily_forecast_local/src/__pycahe__/
 tmp.ipynb
 output/
 sb_*.sh
+outputs/
+data/
+src/__pycache__/

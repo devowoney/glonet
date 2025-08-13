@@ -1,13 +1,25 @@
 # Data Configuration
 data_dir: "data"
-num_workers: 4
-pin_memory: true
+num_workers: 0  # Set to 0 for Windows compatibility
+pin_memory: false  # Disable for CPU training
 
-# Input data paths
-input_paths:
-  input1: "${data.data_dir}/input1.nc"
-  input2: "${data.data_dir}/input2.nc" 
-  input3: "${data.data_dir}/input3.nc"
+# Input data paths - can be single file, list of files, or dict mapping variables to files
+input_paths: "data/sample_ocean.nc"
+
+# Variables to use from the NetCDF files
+# If null, will use all available variables
+variables: null
+  # Example variables for ocean forecasting:
+  # - "thetao"  # sea water potential temperature
+  # - "so"      # salinity
+  # - "uo"      # eastward velocity
+  # - "vo"      # northward velocity
+  # - "zos"     # sea surface height
+
+# Dimension names in the NetCDF files
+dimensions:
+  time: "time"
+  spatial: ["lat", "lon"]  # [height, width]
 
 # Data preprocessing
 preprocessing:
@@ -21,8 +33,8 @@ val_split: 0.1
 test_split: 0.1
 
 # Forecast parameters
-forecast_cycle: 7
-forecast_horizon: 1
+forecast_cycle: 7      # Input sequence length
+forecast_horizon: 1    # How many timesteps ahead to predict
 
 # Data augmentation
 augmentation:
