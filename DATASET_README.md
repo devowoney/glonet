@@ -41,12 +41,11 @@ dataset = XrDataset(
 ```
 
 ### 2. Updated Training Script (`train.py`)
-Enhanced the training script to use XrDataset with fallback to dummy data.
+Enhanced the training script to use XrDataset.
 
 **Key Changes:**
 - Added `create_data_loaders()` function that uses XrDataset
 - Integrated with Hydra configuration system
-- Automatic fallback to dummy data if NetCDF files aren't available
 - Proper device handling (CPU/CUDA) with automatic detection
 
 ### 3. Updated GLONET Model (`src/glonet.py`)
@@ -80,13 +79,9 @@ preprocessing:
   crop_size: [128, 128]
 
 # Forecast parameters
-forecast_cycle: 7      # Input sequence length
-forecast_horizon: 1    # Prediction horizon
+sequence_length: 2      # Input sequence length
+forecast_horizon: 7    # How many timesteps ahead to predict
 ```
-
-### 5. Example and Test Files
-- **`test_dataset.py`**: Standalone test script that creates sample data and tests XrDataset
-- **`requirements.txt`**: Updated dependencies including xarray, netcdf4, and timm
 
 ## Data Format Requirements
 
@@ -94,13 +89,15 @@ The XrDataset expects NetCDF files with the following structure:
 - **Time dimension**: Named 'time' (configurable)
 - **Spatial dimensions**: Named 'lat' and 'lon' (configurable)
 - **Variables**: Any number of data variables (e.g., 'thetao', 'so', 'uo', 'vo', 'zos')
+- **Channel**: Copernicus Marine offers oceans depth data. Be aware that the input Dataset has flattened dimension with variables, called channel.
 
-Example data structure:
+Example data structure (Copernicus Marine):
 ```
 <xarray.Dataset>
-Dimensions:  (time: 30, lat: 64, lon: 64)
+Dimensions:  (time: 30, depth 10, lat: 64, lon: 64)
 Coordinates:
   * time     (time) datetime64[ns] 2023-01-01 ... 2023-01-30
+  * depth    (depth) float64 0.494 50.20 ... 785.40
   * lat      (lat) float64 -90.0 -87.1 ... 87.1 90.0
   * lon      (lon) float64 -180.0 -174.4 ... 174.4 180.0
 Data variables:
@@ -108,7 +105,23 @@ Data variables:
     so       (time, lat, lon) float64 ...
     uo       (time, lat, lon) float64 ...
     vo       (time, lat, lon) float64 ...
-    zos      (time, lat, lon) float64 ...
+```
+
+Example data structure (GLONET input):
+```
+<xarray.Dataset>
+Dimensions:  (time: 30, channel 40, lat: 64, lon: 64)
+Coordinates:
+  * time     (time) datetime64[ns] 2023-01-01 ... 2023-01-30
+  * channel  (channel) int 1 2 ... 40
+  * lat      (lat) float64 -90.0 -87.1 ... 87.1 90.0
+  * lon      (lon) float64 -180.0 -174.4 ... 174.4 180.0
+Data variables:
+    thetao   (time, lat, lon) float64 ...
+    so       (time, lat, lon) float64 ...
+    uo       (time, lat, lon) float64 ...
+    vo       (time, lat, lon) float64 ...
+
 ```
 
 ## Running the Training
@@ -118,11 +131,6 @@ Data variables:
 python train.py data.input_paths="path/to/your/data.nc"
 ```
 
-### With Sample Data (for testing)
-```bash
-python test_dataset.py  # Creates sample data
-python train.py         # Uses sample data by default
-```
 
 ### Configuration Override Examples
 ```bash
@@ -147,8 +155,8 @@ python train.py training.epochs=1 training.batch_size=2
 ### Data Configuration
 - `input_paths`: Path(s) to NetCDF files
 - `variables`: List of variables to use (null for all)
-- `forecast_cycle`: Input sequence length
-- `forecast_horizon`: Prediction horizon
+-  `sequence_length`: Input sequence
+-  `forecast_horizon`: Forecast time
 - `preprocessing.crop_size`: Spatial cropping
 - `preprocessing.normalize`: Min-max normalization
 - `preprocessing.standardize`: Z-score standardization
@@ -168,11 +176,7 @@ The system includes robust error handling:
 
 ## Next Steps
 
-To use this with your own data:
-1. Prepare NetCDF files with the expected structure
-2. Update `config/data/default.yaml` with your data paths
-3. Specify variables if needed
-4. Adjust preprocessing parameters as needed
-5. Run training with appropriate configuration
+1. **Flexibility of CUDA**: Parallel computing
+2. **Lightning**: Pytorch lightning integration
 
 The system is now ready for production use with real oceanographic data while maintaining compatibility with the existing GLONET architecture.

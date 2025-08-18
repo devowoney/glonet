@@ -133,7 +133,7 @@ python config_utils.py create my_model --template model
 
 ### Model Configuration (`config/model/glonet.yaml`)
 - Defines GLONET architecture parameters
-- Includes dimensions, layer counts, kernel sizes
+- Includes dimensions, layer counts, kernel sizes and submodules
 - Can be easily modified for different model variants
 
 ### Training Configuration (`config/training/default.yaml`)

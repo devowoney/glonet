@@ -62,6 +62,7 @@ class GlonetTrainer:
         log.info(f"Model initialized with {self.count_parameters()} parameters")
         log.info(f"Using device: {self.device}")
     
+    
     def _build_model(self) -> nn.Module:
         """Build the GLONET model"""
         

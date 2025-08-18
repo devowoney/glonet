@@ -12,7 +12,7 @@ seed: 42
 device: "cuda:0"
 
 # Output settings
-output_dir: "outputs"
+output_dir: "outputs/"
 save_checkpoint: true
 checkpoint_interval: 10
 log_interval: 100
@@ -20,6 +20,6 @@ log_interval: 100
 # Hydra settings
 hydra:
   run:
-    dir: ./outputs/${now:%Y-%m-%d}/${experiment_name}-${now:%H-%M-%S}
+    dir: ./outputs/${now:%Y-%m-%d-%H-%M-%S}
   job:
     chdir: false

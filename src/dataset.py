@@ -75,14 +75,14 @@ class XrDataset(Dataset):
         # Load and process data
         self.data = self._load_data()
         self.data = self._preprocess_data()
-        self.data = self._split_data()
+        
+        # Create valid indices for sequences
+        self._make_valid_indices()
+        self._split_indices()
         
         # Calculate statistics for normalization
         if self.normalize or self.standardize :
             self._calculate_statistics()
-        
-        # Create valid indices for sequences
-        self._create_sequence_indices()
         
         log.info(f"Initialized XrDataset with {len(self)} samples for split '{split}'")
         log.info(f"Data shape: {self.data.shape}")
