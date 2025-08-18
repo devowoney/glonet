@@ -64,32 +64,34 @@ class GlonetTrainer:
     
     def _build_model(self) -> nn.Module:
         """Build the GLONET model"""
+        
         model_cfg = self.cfg.model
         
         # Extract parameters from config
-        dim = model_cfg.dim
-        dT = model_cfg.get('dT', 64)
-        dS = model_cfg.get('dS', 64)
-        NT = model_cfg.get('NT', 2)
-        NS = model_cfg.get('NS', 8)
-        ker = model_cfg.get('ker', [3, 5, 7])
-        groups = model_cfg.get('groups', 8)
+        # dim = model_cfg.dim
+        # dT = model_cfg.get('dT', 64)
+        # dS = model_cfg.get('dS', 64)
+        # NT = model_cfg.get('NT', 2)
+        # NS = model_cfg.get('NS', 8)
+        # ker = model_cfg.get('ker', [3, 5, 7])
+        # groups = model_cfg.get('groups', 8)
         
-        model = Glonet(
-            dim=dim,
-            dT=dT,
-            dS=dS,
-            NT=NT,
-            NS=NS,
-            ker=ker,
-            groups=groups,
-            device=self.device.type
-        )
+        # model = Glonet(
+        #     dim=dim,
+        #     dT=dT,
+        #     dS=dS,
+        #     NT=NT,
+        #     NS=NS,
+        #     ker=ker,
+        #     groups=groups,
+        #     device=self.device.type
+        # )
         
-        return model.to(self.device)
+        return instantiate(model_cfg).to(self.device)
     
     def _build_optimizer(self):
         """Build optimizer"""
+        
         return instantiate(
             self.cfg.training.optimizer,
             params=self.model.parameters()
@@ -97,6 +99,7 @@ class GlonetTrainer:
     
     def _build_scheduler(self):
         """Build learning rate scheduler"""
+        
         if 'scheduler' in self.cfg.training:
             return instantiate(
                 self.cfg.training.scheduler,
@@ -106,10 +109,13 @@ class GlonetTrainer:
     
     def count_parameters(self) -> int:
         """Count trainable parameters"""
+        
         return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
     
-    def train_epoch(self, train_loader) -> Dict[str, float]:
+    def train_epoch(self, 
+                    train_loader : torch.utils.data.DataLoader) -> Dict[str, float]:
         """Train for one epoch"""
+        
         self.model.train()
         total_loss = 0.0
         num_batches = 0
@@ -144,8 +150,10 @@ class GlonetTrainer:
         
         return {'train_loss': total_loss / num_batches}
     
-    def validate(self, val_loader) -> Dict[str, float]:
+    def validate(self, 
+                 val_loader : torch.utils.data.DataLoader) -> Dict[str, float]:
         """Validate the model"""
+        
         self.model.eval()
         total_loss = 0.0
         num_batches = 0
@@ -160,8 +168,12 @@ class GlonetTrainer:
         
         return {'val_loss': total_loss / num_batches}
     
-    def save_checkpoint(self, epoch: int, is_best: bool = False):
+    
+    def save_checkpoint(self, 
+                        epoch : int, 
+                        is_best : bool = False) -> None :
         """Save model checkpoint"""
+        
         checkpoint = {
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
@@ -174,17 +186,21 @@ class GlonetTrainer:
             checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
         
         # Save regular checkpoint
-        checkpoint_path = self.output_dir / f"checkpoint_epoch_{epoch}.pth"
+        checkpoint_path = self.output_dir / f"checkpoint_epoch_{epoch}.ckpt"
         torch.save(checkpoint, checkpoint_path)
         
         # Save best model
         if is_best:
-            best_path = self.output_dir / "best_model.pth"
+            best_path = self.output_dir / "best_model.ckpt"
             torch.save(checkpoint, best_path)
             log.info(f"New best model saved with validation loss: {self.best_val_loss:.6f}")
     
-    def train(self, train_loader, val_loader):
+    
+    def train(self, 
+              train_loader : torch.utils.data.DataLoader, 
+              val_loader : torch.utils.data.DataLoader) -> float:
         """Main training loop"""
+        
         log.info("Starting training...")
         
         for epoch in range(1, self.cfg.training.epochs + 1):
@@ -202,8 +218,8 @@ class GlonetTrainer:
             
             # Check if this is the best model
             current_val_loss = val_metrics['val_loss']
-            is_best = current_val_loss < self.best_val_loss
-            if is_best:
+            is_bestmodel = current_val_loss < self.best_val_loss
+            if is_bestmodel:
                 self.best_val_loss = current_val_loss
             
             # Log metrics
@@ -213,14 +229,16 @@ class GlonetTrainer:
             
             # Save checkpoint
             if self.cfg.save_checkpoint and epoch % self.cfg.checkpoint_interval == 0:
-                self.save_checkpoint(epoch, is_best)
+                self.save_checkpoint(epoch, is_bestmodel)
         
         log.info("Training completed!")
+        
         return self.best_val_loss
 
 
 def create_data_loaders(cfg) -> tuple:
     """Create data loaders using XrDataset"""
+    
     try:
         # Create datasets using the new XrDataset class
         train_dataset, val_dataset, test_dataset = create_xr_datasets(cfg)
@@ -259,53 +277,56 @@ def create_data_loaders(cfg) -> tuple:
         return train_loader, val_loader, test_loader
         
     except Exception as e:
-        log.warning(f"Failed to create XrDataset: {e}")
-        log.info("Falling back to dummy data loader...")
+        log.error(f"Failed to create data loaders: {e}")
+        sys.exit(1)
+        
+        # log.warning(f"Failed to create XrDataset: {e}")
+        # log.info("Falling back to dummy data loader...")
         
         # Fallback to dummy data if XrDataset fails
-        train_loader = create_dummy_data_loader(cfg, 'train')
-        val_loader = create_dummy_data_loader(cfg, 'val')
-        test_loader = create_dummy_data_loader(cfg, 'test')
+        # train_loader = create_dummy_data_loader(cfg, 'train')
+        # val_loader = create_dummy_data_loader(cfg, 'val')
+        # # test_loader = create_dummy_data_loader(cfg, 'test')
         
-        return train_loader, val_loader, test_loader
+        # return train_loader, val_loader, test_loader
 
 
-def create_dummy_data_loader(cfg: DictConfig, split: str = 'train'):
-    """Create a dummy data loader for demonstration"""
-    # This is a placeholder - replace with your actual data loading logic
-    import torch.utils.data as data
+# def create_dummy_data_loader(cfg: DictConfig, split: str = 'train'):
+#     """Create a dummy data loader for demonstration"""
+#     # This is a placeholder - replace with your actual data loading logic
+#     import torch.utils.data as data
     
-    batch_size = cfg.training.batch_size
-    dim = cfg.model.dim
+#     batch_size = cfg.training.batch_size
+#     dim = cfg.model.dim
     
-    # Create dummy dataset
-    class DummyDataset(data.Dataset):
-        def __init__(self, size=1000):
-            self.size = size
+#     # Create dummy dataset
+#     class DummyDataset(data.Dataset):
+#         def __init__(self, size=1000):
+#             self.size = size
             
-        def __len__(self):
-            return self.size
+#         def __len__(self):
+#             return self.size
             
-        def __getitem__(self, idx):
-            # Input shape: [T, C, H, W]
-            input_data = torch.randn(*dim)
-            # Target shape: [C, H, W] (forecast for first timestep)
-            target_data = torch.randn(dim[1], dim[2], dim[3])
-            return input_data, target_data
+#         def __getitem__(self, idx):
+#             # Input shape: [T, C, H, W]
+#             input_data = torch.randn(*dim)
+#             # Target shape: [C, H, W] (forecast for first timestep)
+#             target_data = torch.randn(dim[1], dim[2], dim[3])
+#             return input_data, target_data
     
-    dataset = DummyDataset(size=800 if split == 'train' else 200)
+#     dataset = DummyDataset(size=800 if split == 'train' else 200)
     
-    return data.DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=(split == 'train'),
-        num_workers=cfg.data.num_workers,
-        pin_memory=cfg.data.pin_memory
-    )
+#     return data.DataLoader(
+#         dataset,
+#         batch_size=batch_size,
+#         shuffle=(split == 'train'),
+#         num_workers=cfg.data.num_workers,
+#         pin_memory=cfg.data.pin_memory
+#     )
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
-def main(cfg: DictConfig) -> float:
+def main(cfg : DictConfig) -> float:
     """Main training function"""
     
     # Print configuration

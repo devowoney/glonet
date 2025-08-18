@@ -12,15 +12,32 @@ NS: 8               # Number of spatial layers
 ker: [3, 5, 7]      # Kernel sizes for inception blocks
 groups: 8           # Number of groups for convolutions
 
-# Sub-module configurations
+# ============================================= Sub-module configurations ==
 space:
+  _target_: src.blocks.mspace
+  channel_in: 5
   channel_hid: 64
-  N_T: 8
-  
+  N_T: 2
+  h: 128
+  w: 128
+  ker: [3, 5, 7, 11]
+  groups: 8
+
 dynamics:
-  n_heads: 4
-  patch_size: [16, 16]
-  
+  _target_: src.blocks.tmp
+  dim: [2, 5, 128, 128]
+  ni: 3
+  n_heads: 8
+  patch_size: [8, 8]
+
 maps:
+  _target_: src.NN.Encoder
+  C_in: 5
   C_hid: 64
-  N_S: 2
+  N_S: 8
+
+mapsback:
+  _target_: src.NN.Decoder
+  C_hid: 64
+  C_out: 5
+  N_S: 8

@@ -23,21 +23,20 @@ class XrDataset(Dataset):
     and provides sequences for temporal forecasting.
     """
     
-    def __init__(
-        self,
-        data_paths: Union[str, List[str], Dict[str, str]],
-        sequence_length: int = 7,
-        forecast_horizon: int = 1,
-        variables: Optional[List[str]] = None,
-        spatial_dims: Tuple[str, str] = ('lat', 'lon'),
-        time_dim: str = 'time',
-        crop_size: Optional[Tuple[int, int]] = None,
-        normalize: bool = True,
-        standardize: bool = True,
-        transform=None,
-        split: str = 'train',
-        split_ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
-        random_seed: int = 42
+    def __init__(self, 
+                 data_paths: Union[str, List[str], Dict[str, str]],
+                 variables: Optional[List[str]] = None,
+                 spatial_dims: Tuple[str, str] = ('lat', 'lon'),
+                 time_dim: str = 'time',
+                 sequence_length: int = 2,
+                 forecast_horizon: int = 7,
+                 crop_zone: Optional[Tuple[int, int, int, int]] = None,
+                 normalize: bool = True,
+                 standardize: bool = False,
+                 split: str = 'train',
+                 split_ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
+                 stat_path: str = "data/statistics.pth",
+                 random_seed: int = 42
     ):
         """
         Initialize XrDataset
@@ -47,31 +46,30 @@ class XrDataset(Dataset):
                 - Single string path
                 - List of paths 
                 - Dict mapping variable names to paths
-            sequence_length: Number of timesteps in input sequence
-            forecast_horizon: Number of timesteps to forecast
             variables: List of variable names to use. If None, uses all variables
             spatial_dims: Names of spatial dimensions (height, width)
             time_dim: Name of time dimension
-            crop_size: Spatial crop size (H, W). If None, uses full spatial extent
+            sequence_length: Number of timesteps in input sequence
+            forecast_horizon: Number of timesteps to forecast
+            crop_zone: Spatial crop size (H1, W1, H2, W2). If None, uses full spatial extent
             normalize: Whether to normalize data to [0, 1]
             standardize: Whether to standardize data (mean=0, std=1)
-            transform: Optional transform function
             split: Dataset split ('train', 'val', 'test')
             split_ratios: Ratios for train/val/test split
             random_seed: Random seed for reproducible splits
         """
         self.data_paths = data_paths
-        self.sequence_length = sequence_length
-        self.forecast_horizon = forecast_horizon
         self.variables = variables
         self.spatial_dims = spatial_dims
         self.time_dim = time_dim
-        self.crop_size = crop_size
+        self.sequence_length = sequence_length
+        self.forecast_horizon = forecast_horizon
+        self.crop_zone = crop_zone
         self.normalize = normalize
         self.standardize = standardize
-        self.transform = transform
         self.split = split
         self.split_ratios = split_ratios
+        self.stat_path = stat_path
         self.random_seed = random_seed
         
         # Load and process data
@@ -80,7 +78,7 @@ class XrDataset(Dataset):
         self.data = self._split_data()
         
         # Calculate statistics for normalization
-        if self.normalize or self.standardize:
+        if self.normalize or self.standardize :
             self._calculate_statistics()
         
         # Create valid indices for sequences
@@ -89,16 +87,19 @@ class XrDataset(Dataset):
         log.info(f"Initialized XrDataset with {len(self)} samples for split '{split}'")
         log.info(f"Data shape: {self.data.shape}")
     
-    def _load_data(self) -> xr.Dataset:
+    def _load_data(self) -> xr.Dataset :
         """Load data from NetCDF files"""
-        if isinstance(self.data_paths, str):
+        
+        if isinstance(self.data_paths, str) :
             # Single file
             data = xr.open_dataset(self.data_paths)
-        elif isinstance(self.data_paths, list):
+            
+        elif isinstance(self.data_paths, list) :
             # Multiple files - concatenate along time dimension
             datasets = [xr.open_dataset(path) for path in self.data_paths]
             data = xr.concat(datasets, dim=self.time_dim)
-        elif isinstance(self.data_paths, dict):
+            
+        elif isinstance(self.data_paths, dict) :
             # Dictionary mapping variables to files
             data_arrays = {}
             for var_name, path in self.data_paths.items():
@@ -106,14 +107,21 @@ class XrDataset(Dataset):
                 if self.variables is None or var_name in self.variables:
                     data_arrays[var_name] = ds[var_name] if var_name in ds else ds[list(ds.data_vars)[0]]
             data = xr.Dataset(data_arrays)
+            
         else:
             raise ValueError("data_paths must be str, list, or dict")
         
         # Select variables if specified
-        if self.variables is not None:
+        if self.variables is not None :
             available_vars = list(data.data_vars)
+            
+            # selected_vars = []
+            # for var in self.variables :
+            #     if var in available_vars :
+            #         selected_vars.append(var)
             selected_vars = [var for var in self.variables if var in available_vars]
-            if not selected_vars:
+            
+            if not selected_vars : # len(selected_vars) == 0 :
                 raise ValueError(f"None of the specified variables {self.variables} found in data. Available: {available_vars}")
             data = data[selected_vars]
         
@@ -126,67 +134,83 @@ class XrDataset(Dataset):
         
         return data
     
-    def _preprocess_data(self) -> torch.Tensor:
+    
+    def _preprocess_data(self) -> torch.Tensor :
         """Preprocess the loaded data"""
+        
         # Convert to numpy array
         # Stack variables along channel dimension
         data_arrays = []
-        for var in self.data.data_vars:
+        for var in self.data.data_vars :
             arr = self.data[var].values
-            # Ensure we have the right dimensions [T, H, W]
-            if len(arr.shape) == 3:
+            # Ensure we have the right dimensions [T, C, H, W]
+            if len(arr.shape) == 4 :
                 data_arrays.append(arr)
-            else:
-                raise ValueError(f"Expected 3D array for variable {var}, got shape {arr.shape}")
-        
+            else :
+                raise ValueError(f"Expected 4D array for variable {var}, got shape {arr.shape}")
+
         # Stack along channel dimension: [T, C, H, W]
         data = np.stack(data_arrays, axis=1)
         
         # Spatial cropping if specified
-        if self.crop_size is not None:
-            T, C, H, W = data.shape
-            crop_h, crop_w = self.crop_size
+        if self.crop_zone is not None :
+            start_h, start_w, end_h, end_w = self.crop_zone
             
             # Center crop
-            start_h = (H - crop_h) // 2
-            start_w = (W - crop_w) // 2
-            data = data[:, :, start_h:start_h+crop_h, start_w:start_w+crop_w]
-        
+            data = data[:, :, start_h:end_h, start_w:end_w]
+
         # Convert to torch tensor
-        data = torch.from_numpy(data).float()
+        data = torch.from_numpy(data).float() #.double()
         
         log.info(f"Preprocessed data shape: {data.shape}")
         return data
     
-    def _split_data(self) -> torch.Tensor:
-        """Split data according to split ratios"""
+
+    def _make_valid_indices(self) :
+        """Create valid indices in taking into account `sequence_length` and `forecast_horizon`."""
+        
         T = self.data.shape[0]
-        train_ratio, val_ratio, test_ratio = self.split_ratios
+
+        # We need at least sequence_length + forecast_horizon timesteps
+        min_length = self.sequence_length + self.forecast_horizon
         
-        # Set random seed for reproducible splits
-        np.random.seed(self.random_seed)
-        indices = np.random.permutation(T)
-        
-        train_size = int(T * train_ratio)
-        val_size = int(T * val_ratio)
-        
-        if self.split == 'train':
-            split_indices = indices[:train_size]
-        elif self.split == 'val':
-            split_indices = indices[train_size:train_size+val_size]
-        elif self.split == 'test':
-            split_indices = indices[train_size+val_size:]
-        else:
-            raise ValueError("split must be 'train', 'val', or 'test'")
-        
-        # Sort indices to maintain temporal order within split
-        split_indices = np.sort(split_indices)
-        
-        return self.data[split_indices]
+        if T < min_length:
+            raise ValueError(f"Dataset too small: {T} timesteps, need at least {min_length}")
+
+        # Valid start indices
+        self.valid_indices = list(range(T - min_length + 1))
+        log.info(f"Checked {len(self.valid_indices)} valid sequence starting indices")
     
-    def _calculate_statistics(self):
+        
+    def _split_indices(self) -> None :
+        """Shuffle and split indices for train/val/test sets instead of directly shuffling the dataset."""
+        
+        T = len(self.valid_indices)
+        train_size = int(T * self.split_ratio[0])
+        val_size = int(T * self.split_ratio[1])
+        test_size = T - train_size - val_size
+
+        # Set random seed for reproducible splits
+        np.random.seed(self.ran_seed)
+        indices = np.random.permutation(T)
+
+        if self.split == 'train' :
+            self.split_indices = indices[:train_size]
+        elif self.split == 'val' :
+            self.split_indices = indices[train_size:train_size + val_size]
+        elif self.split == 'test' :
+            self.split_indices = indices[train_size + val_size:]
+        else:
+            raise ValueError(f"Unknown split mode: {self.split}")
+
+        # Sort indices to maintain temporal order within split
+        self.split_indices = np.sort(self.split_indices)
+        
+
+    def _calculate_statistics(self) -> None :
         """Calculate mean and std for normalization/standardization"""
-        if self.split == 'train':
+        
+        if self.split == 'train' :
             # Calculate statistics only on training data
             self.mean = self.data.mean(dim=(0, 2, 3), keepdim=True)
             self.std = self.data.std(dim=(0, 2, 3), keepdim=True)
@@ -198,45 +222,49 @@ class XrDataset(Dataset):
             self.data_min = self.data.min()
             self.data_max = self.data.max()
             
+            
             log.info(f"Calculated statistics - Mean: {self.mean.mean():.4f}, Std: {self.std.mean():.4f}")
             log.info(f"Data range: [{self.data_min:.4f}, {self.data_max:.4f}]")
-        else:
-            # For val/test, we'll need to load stats from training set
-            # This is a simplified version - in practice, you'd save/load these stats
-            self.mean = self.data.mean(dim=(0, 2, 3), keepdim=True)
-            self.std = self.data.std(dim=(0, 2, 3), keepdim=True)
+
+            # Save statistics in tensor with pytorch
+            
+            statistics = {
+                'data_mean' : torch.tensor([self.mean]),
+                'data_std' : torch.tensor([self.std]),
+                'data_min' : torch.tensor(self.data_min.item()),
+                'data_max' : torch.tensor(self.data_max.item())
+            }
+
+            torch.save(statistics, self.stat_path)
+            log.info(f"Train statistics data is save in {self.stat_path}")
+
+        else :
+            # Load saved statistics data from training data
+            statistics = torch.load(self.stat_path)
+
+            self.mean = statistics.get('data_mean')
+            self.std = statistics.get('data_std')
             self.std = torch.clamp(self.std, min=1e-8)
-            self.data_min = self.data.min()
-            self.data_max = self.data.max()
-    
-    def _create_sequence_indices(self):
-        """Create valid indices for sequence extraction"""
-        T = self.data.shape[0]
-        # We need at least sequence_length + forecast_horizon timesteps
-        min_length = self.sequence_length + self.forecast_horizon
-        
-        if T < min_length:
-            raise ValueError(f"Dataset too small: {T} timesteps, need at least {min_length}")
-        
-        # Valid starting indices
-        self.valid_indices = list(range(T - min_length + 1))
-        
-        log.info(f"Created {len(self.valid_indices)} valid sequence starting indices")
-    
-    def __len__(self) -> int:
+            self.data_min = statistics.get('data_min')
+            self.data_max = statistics.get('data_max')
+
+
+    def __len__(self) -> int :
         """Return number of available sequences"""
+        
         return len(self.valid_indices)
     
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor] :
         """
-        Get a sequence and its corresponding target
-        
+        Get a set of input sequences and its corresponding target
+
         Returns:
             input_sequence: [T, C, H, W] - input sequence
             target: [C, H, W] - target for forecasting
         """
-        start_idx = self.valid_indices[idx]
-        
+
+        start_idx = self.valid_indices[idx] - 1
+
         # Extract input sequence
         input_sequence = self.data[start_idx:start_idx + self.sequence_length]
         
@@ -253,13 +281,10 @@ class XrDataset(Dataset):
             input_sequence = (input_sequence - self.mean) / self.std
             target = (target - self.mean.squeeze(0)) / self.std.squeeze(0)
         
-        # Apply additional transforms if specified
-        if self.transform is not None:
-            input_sequence, target = self.transform(input_sequence, target)
-        
         return input_sequence, target
     
-    def get_data_info(self) -> Dict:
+    
+    def get_data_info(self) -> Dict :
         """Get information about the dataset"""
         return {
             'num_samples': len(self),
@@ -267,7 +292,8 @@ class XrDataset(Dataset):
             'forecast_horizon': self.forecast_horizon,
             'data_shape': tuple(self.data.shape),
             'num_channels': self.data.shape[1],
-            'spatial_size': self.data.shape[2:],
+            'normalized': self.normalize,
+            'standardized': self.standardize,
             'split': self.split
         }
 
@@ -285,26 +311,24 @@ def create_xr_datasets(cfg) -> Tuple[XrDataset, XrDataset, XrDataset]:
     # Extract configuration parameters
     data_cfg = cfg.data
     model_cfg = cfg.model
-    
-    # Get sequence length from forecast_cycle in data config, fallback to model dim
-    sequence_length = data_cfg.get('forecast_cycle', model_cfg.dim[0] if hasattr(model_cfg, 'dim') else 7)
-    
+
     # Dataset parameters
     dataset_params = {
-        'data_paths': data_cfg.get('input_paths', 'data/input.nc'),
-        'sequence_length': sequence_length,
-        'forecast_horizon': data_cfg.get('forecast_horizon', 1),
-        'variables': data_cfg.get('variables', None),
-        'spatial_dims': data_cfg.get('dimensions', {}).get('spatial', ['lat', 'lon']),
-        'time_dim': data_cfg.get('dimensions', {}).get('time', 'time'),
-        'crop_size': data_cfg.get('preprocessing', {}).get('crop_size', None),
-        'normalize': data_cfg.get('preprocessing', {}).get('normalize', True),
-        'standardize': data_cfg.get('preprocessing', {}).get('standardize', True),
-        'split_ratios': (
+        'data_paths' : data_cfg.get('input_paths', 'data/input.nc'),
+        'variables' : data_cfg.get('variables', None),
+        'spatial_dims' : data_cfg.get('dimensions', {}).get('spatial', ['lat', 'lon']),
+        'time_dim' : data_cfg.get('dimensions', {}).get('time', 'time'),
+        'sequence_length' : data_cfg.get('sequence_length', model_cfg.dim[0] if hasattr(model_cfg, 'dim') else 2),
+        'forecast_horizon' : data_cfg.get('forecast_horizon', 10),
+        'crop_zone' : data_cfg.get('preprocessing', {}).get('crop_zone', None),
+        'normalize' : data_cfg.get('preprocessing', {}).get('normalize', True),
+        'standardize' : data_cfg.get('preprocessing', {}).get('standardize', True),
+        'split_ratios' : (
             data_cfg.get('train_split', 0.8),  
             data_cfg.get('val_split', 0.1),  
             data_cfg.get('test_split', 0.1) 
         ), 
+        'stat_path': data_cfg.get('statistics', {}).get('save_path', 'data/statistics.pth'),
         'random_seed': cfg.get('seed', 42) 
     } 
      
