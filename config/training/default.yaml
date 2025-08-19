@@ -24,9 +24,6 @@ loss:
 # Gradient clipping
 grad_clip_norm: 1.0
 
-# Mixed precision training
-use_amp: false
-
 # Early stopping
 early_stopping:
   patience: 20

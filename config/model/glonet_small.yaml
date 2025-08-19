@@ -1,5 +1,5 @@
 # Lightweight GLONET Configuration for testing
-_target_: src.glonet.Glonet
+_target_: src.glonetLit.Glonet
 
 # Reduced model dimensions for faster testing
 dim: [2, 5, 64, 64]  # Smaller spatial resolution

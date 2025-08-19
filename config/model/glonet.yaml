@@ -1,5 +1,5 @@
 # GLONET Model Configuration
-_target_: src.glonet.Glonet
+_target_: src.glonetLit.Glonet
 
 # Model dimensions
 dim: [2, 5, 128, 128]  # [T, C, H, W] - Time, Channels, Height, Width
