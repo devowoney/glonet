@@ -12,7 +12,7 @@ from .NN import *
 
 class Glonet(pl.LightningModule):
     def __init__(self, cfg: DictConfig):
-        super(Glonet, self).__init__()
+        super().__init__()
         
         # Store config
         self.cfg = cfg
