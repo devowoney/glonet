@@ -76,7 +76,7 @@ class XrDataset(Dataset):
         self.data = self._load_data()
         self.data = self._preprocess_data()
         
-        # Create valid indices for sequences
+        # Create valid indices for forecasting
         self._make_valid_indices()
         self._split_indices()
         

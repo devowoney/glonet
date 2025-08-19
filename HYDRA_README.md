@@ -273,3 +273,9 @@ outputs/
 - Check the configuration with: `python config_utils.py validate <config_path>`
 - Print configuration with: `python config_utils.py print <config_path>`
 - Use `python example.py --help` to see all available options
+
+
+### Future work
+
+1. **Tensorboard**: Add Tensorboard logging
+2. **Lightning**: Integrate pytorch lightning feature

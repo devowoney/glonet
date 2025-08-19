@@ -4,6 +4,7 @@ defaults:
   - /model: glonet
   - /training: default  
   - /data: ocean
+  - _self_
   
 experiment_name: "ocean_forecast_full"
 seed: 42
