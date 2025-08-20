@@ -1,0 +1,10 @@
+defaults:
+  # model is called from saved point
+  # - model: glonet 
+  - training: default
+
+model_dir: "/Odyssey/public/glonet/TrainedWeights"
+data_dir: "/Odyssey/public/glonet"
+state_number: 1  # Change this to 2 or 3 for other states (surface : 1, deep : 2, deeper : 3)
+sample_index:
+
