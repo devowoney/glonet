@@ -3,8 +3,15 @@ defaults:
   # - model: glonet 
   - training: default
 
+run_name: optimtest
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${run_name}_${now:%H%M%S}
+  job:
+    name: ${run_name}
+
 model_dir: "/Odyssey/public/glonet/TrainedWeights"
-data_dir: "/Odyssey/public/glonet"
+data_dir: "/Odyssey/public/glonet/glorys12_2020-01-01_to_2020-12-31_init_states"
 state_number: 1  # Change this to 2 or 3 for other states (surface : 1, deep : 2, deeper : 3)
-sample_index:
+sample_index: 0
 

@@ -6,5 +6,6 @@ TrainedWeights/
 glonet_daily_forecast_local/src/__pycahe__/
 tmp.ipynb
 output/
+outputs/
 sb_*.sh
 src/__pycache__/

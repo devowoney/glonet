@@ -44,21 +44,29 @@ def main(cfg : DictConfig):
         data_dir=data_dir, 
         input_file=input_file,
         sample_index=sample_index, 
-        batch_size=cfg.training.batch_size, 
-        num_workers=cfg.training.num_workers
+        batch_size=cfg.training.datamodule.batch_size, 
+        num_workers=cfg.training.datamodule.num_workers
     )
     data_module.setup()
-    
+
     # Get the input sequence and target for this sample
     input_sequence, target = data_module.train_dataset.input_sequence, data_module.train_dataset.target
     
-    print(f"Loaded sample {sample_index} from {input_file}")
-    print(f"Input sequence shape: {input_sequence.shape}")
-    print(f"Target shape: {target.shape}")
-    print(f"Input sequence stats: mean={input_sequence.mean():.4f}, std={input_sequence.std():.4f}")
-    
     # Initialize model with the actual input sequence as the trainable parameter
-    model = Glonet(model_path=model_path, init_input=input_sequence.clone())
+    model = Glonet(model_path=model_path)
+    
+    # Move model and data to the correct device to avoid dtype/device mismatches
+    device = torch.device("cuda:0" if torch.cuda.is_available() and getattr(cfg.training.trainer, "devices", None) else "cpu")
+    model.to(device)
+    try:
+        model.saved_model = model.saved_model.to(device)
+    except Exception:
+        pass
+    input_sequence = input_sequence.to(device)
+    target = target.to(device)
+    
+    # Reset gradients
+    model.zero_grad()
     
     # Define callbacks
     callbacks = [
@@ -74,13 +82,13 @@ def main(cfg : DictConfig):
     
     # Initialize trainer
     trainer = Trainer(
-        max_epochs=cfg.training.epochs,
+        max_epochs=cfg.training.trainer.epochs,
         callbacks=callbacks,
-        accelerator=cfg.training.accelerator,
-        devices=cfg.training.devices,
-        log_every_n_steps=cfg.training.log_every_n_steps,
-        gradient_clip_val=cfg.training.grad_clip_norm,
-        precision=cfg.training.precision,
+        accelerator=cfg.training.trainer.accelerator,
+        devices=cfg.training.trainer.devices,
+        log_every_n_steps=cfg.training.trainer.log_every_n_steps,
+        # gradient_clip_val=cfg.training.trainer.grad_clip_norm,
+        precision=cfg.training.trainer.precision,
         enable_checkpointing=True,
         enable_progress_bar=True,
         enable_model_summary=True
@@ -92,7 +100,7 @@ def main(cfg : DictConfig):
     # Save the optimized input sequence
     optimized_input = model.init_input.data.cpu()
     output_filename = f"optimized_state{state_number}_sample_{sample_index}.pt"
-    torch.save(optimized_input, output_filename)
+    torch.save(optimized_input.detach().cpu(), output_filename)
     
     # Calculate and show the improvement
     original_input = input_sequence
@@ -112,11 +120,16 @@ def main(cfg : DictConfig):
     # Test the optimized input vs original
     model.eval()
     with torch.no_grad():
-        original_prediction = model.saved_model(original_input.unsqueeze(0))
-        optimized_prediction = model.saved_model(optimized_input.unsqueeze(0))
+        # Ensure tensors and model are on same device
+        original_input_device = original_input.to(device)
+        optimized_input_device = optimized_input.to(device)
+        target_device = target.to(device)
+
+        original_prediction = model.saved_model(original_input_device.unsqueeze(0))
+        optimized_prediction = model.saved_model(optimized_input_device.unsqueeze(0))
         
-        original_loss = F.mse_loss(original_prediction, target.unsqueeze(0))
-        optimized_loss = F.mse_loss(optimized_prediction, target.unsqueeze(0))
+        original_loss = F.mse_loss(original_prediction, target_device.unsqueeze(0))
+        optimized_loss = F.mse_loss(optimized_prediction, target_device.unsqueeze(0))
         
         improvement = (original_loss - optimized_loss).item()
         improvement_percent = (improvement / original_loss.item()) * 100
