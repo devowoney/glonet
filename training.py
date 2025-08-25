@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import sys
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 from pathlib import Path
 
 import hydra
@@ -53,7 +54,7 @@ def main(cfg : DictConfig):
     input_sequence, target = data_module.train_dataset.input_sequence, data_module.train_dataset.target
     
     # Initialize model with the actual input sequence as the trainable parameter
-    model = Glonet(model_path=model_path)
+    model = Glonet(model_path=model_path, cfg=cfg)
     
     # Move model and data to the correct device to avoid dtype/device mismatches
     device = torch.device("cuda:0" if torch.cuda.is_available() and getattr(cfg.training.trainer, "devices", None) else "cpu")
@@ -72,13 +73,20 @@ def main(cfg : DictConfig):
     callbacks = [
         ModelCheckpoint(
             monitor=cfg.training.callbacks.monitor,
-            dirpath=f"checkpoints/state{state_number}/",
-            filename="best-model-{epoch:02d}-{train_loss:.2f}",
+            dirpath=cfg.training.callbacks.dirpath,
+            filename=cfg.training.callbacks.filename,
             save_top_k=cfg.training.callbacks.save_top_k,
             mode=cfg.training.callbacks.mode,
             save_last=True
         )
     ]
+    
+    # Initialize TensorBoard logger
+    tb_logger = TensorBoardLogger(
+        save_dir = cfg.training.tensorboard.save_dir,
+        name=cfg.training.tensorboard.name,
+        version=cfg.training.tensorboard.version
+    )
     
     # Initialize trainer
     trainer = Trainer(
@@ -91,7 +99,8 @@ def main(cfg : DictConfig):
         precision=cfg.training.trainer.precision,
         enable_checkpointing=True,
         enable_progress_bar=True,
-        enable_model_summary=True
+        enable_model_summary=True,
+        logger=tb_logger
     )
     
     # Start training

@@ -7,6 +7,7 @@ import torch.optim as optimizer
 import pytorch_lightning as pl
 from typing import Dict, Any, Tuple
 import xarray as xr
+from hydra.utils import instantiate
 
 from blocks import *
 from NN import *
@@ -14,8 +15,12 @@ from NN import *
 
 class Glonet(pl.LightningModule):
     def __init__(self, 
-                 model_path : str):
+                 model_path : str,
+                 cfg = None):
         super().__init__()
+        
+        # Store config for optimizer parameters
+        self.cfg = cfg
         
         # Load JIT model with CPU fallback for device compatibility
         try:
@@ -45,6 +50,7 @@ class Glonet(pl.LightningModule):
         # init_input will be created once in on_train_start
         self.init_input = None
         self._ic_optimizer = None
+        self._ic_scheduler = None
 
     def forward(self, 
                 x : torch.Tensor = None) -> torch.Tensor :
@@ -113,7 +119,23 @@ class Glonet(pl.LightningModule):
             print(f"[Debug]: init_input shape: {self.init_input.shape}")
             print(f"[Debug]: init_input device: {self.init_input.device}")
             
-            self._ic_optimizer = torch.optim.Adam([self.init_input], lr=1e-3, weight_decay=1e-6, betas=(0.9, 0.999))
+            # Create optimizer using Hydra instantiate from config or use default Adam
+            if self.cfg and hasattr(self.cfg, 'training') and hasattr(self.cfg.training, 'optimizer'):
+                print(f"[Debug]: Using config optimizer with instantiate")
+                self._ic_optimizer = instantiate(self.cfg.training.optimizer, params=[self.init_input])
+                print(f"[Debug]: Created optimizer: {type(self._ic_optimizer).__name__}")
+                print(f"[Debug]: Optimizer params - lr: {self._ic_optimizer.param_groups[0]['lr']}, weight_decay: {self._ic_optimizer.param_groups[0]['weight_decay']}")
+            else:
+                print(f"[Debug]: Using default optimizer params")
+                self._ic_optimizer = torch.optim.Adam([self.init_input], lr=1e-1, weight_decay=1e-2, betas=(0.9, 0.999))
+            
+            # Create scheduler using Hydra instantiate from config if available
+            if self.cfg and hasattr(self.cfg, 'training') and hasattr(self.cfg.training, 'scheduler'):
+                print(f"[Debug]: Using config scheduler with instantiate")
+                self._ic_scheduler = instantiate(self.cfg.training.scheduler, optimizer=self._ic_optimizer)
+                print(f"[Debug]: Created scheduler: {type(self._ic_scheduler).__name__}")
+            else:
+                print(f"[Debug]: No scheduler configured, using constant learning rate")
             
             # Test if the model can handle the input
             with torch.no_grad():
@@ -179,6 +201,11 @@ class Glonet(pl.LightningModule):
             
             raise
         opt.step()
+
+        # Step the scheduler if it exists
+        if self._ic_scheduler is not None:
+            self._ic_scheduler.step()
+            print(f"[Debug]: Scheduler stepped, new lr: {self._ic_optimizer.param_groups[0]['lr']}")
 
         # Log loss and gradient diagnostics
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
@@ -271,6 +298,8 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset):
         target_idx = start_idx + self.sequence_length + self.forecast_horizon - 1
         target = self.data[target_idx]
         target = torch.nan_to_num(target)
+        print("[Debug]: Fetched Dataset successfully.")
+        print(f"[Debug]: target shape is : {target.shape}")
         return input_sequence, target
             
     def __len__(self) -> int :
