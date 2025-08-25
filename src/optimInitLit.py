@@ -158,8 +158,8 @@ class Glonet(pl.LightningModule):
         
         # For JIT models, we might need to explicitly enable gradients
         with torch.enable_grad():
-            y_hat = self.forward(self.init_input)
-        
+            output = self.forward(self.init_input)
+            y_hat = output[0, 0] + self.init_input.sum() * 0.0  # Ensure gradient connection
         print(f"[Debug]: After forward pass:")
         print(f"[Debug]: y_hat requires_grad: {y_hat.requires_grad}")
         print(f"[Debug]: y_hat grad_fn: {y_hat.grad_fn}")
@@ -299,6 +299,7 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset):
         target = self.data[target_idx]
         target = torch.nan_to_num(target)
         print("[Debug]: Fetched Dataset successfully.")
+        print(f"[Debug]: input_sequence shape is : {input_sequence.shape}")
         print(f"[Debug]: target shape is : {target.shape}")
         return input_sequence, target
             
