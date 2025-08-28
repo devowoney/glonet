@@ -1,9 +1,14 @@
+# ----------------------------- Main configuration
+# config/
+#   |- config.yaml
+# -----------------------------
+
 defaults:
   # model is called from saved point
   # - model: glonet 
   - training: default
 
-run_name: optimtest
+run_name: outputfix
 hydra:
   run:
     dir: ./outputs/${now:%Y-%m-%d}/${run_name}_${now:%H%M%S}
