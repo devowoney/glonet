@@ -174,6 +174,9 @@ def main(cfg : DictConfig):
     # Test the optimized input vs original
     model.eval()
     with torch.no_grad():
+        # Destandardize input_sequence and target
+        original_input = original_input * std + mean
+        target = target.cpu() * std + mean
         # Ensure tensors and model are on same device
         original_input_deviced = original_input.to(device).unsqueeze(0)
         optimized_input_deviced = optimized_input.to(device).unsqueeze(0)  # Add batch dimension
@@ -188,7 +191,9 @@ def main(cfg : DictConfig):
         print(f"[Debug] : target_device device = {target_deviced.device}")
         
         original_prediction, original_prediction_nc = model.forecast(original_input_deviced)
+        print(f"[Debug] : original_prediction shape = {original_prediction.shape}")
         optimized_prediction, optimized_prediction_nc = model.forecast(optimized_input_deviced)
+        print(f"[Debug] : optimized_prediction shape = {optimized_prediction.shape}")
 
         original_loss = F.mse_loss(original_prediction, target_deviced)
         optimized_loss = F.mse_loss(optimized_prediction, target_deviced)

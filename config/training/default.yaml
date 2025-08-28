@@ -23,7 +23,7 @@ tensorboard:
   version: hptest
 
 trainer:
-  epochs: 10
+  epochs: 1000
   accelerator: "gpu"
   devices: 1
   log_every_n_steps: 1
