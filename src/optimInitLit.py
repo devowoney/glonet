@@ -65,7 +65,7 @@ class Glonet(pl.LightningModule):
 
     def forward(self, 
                 x : torch.Tensor = None) -> torch.Tensor :
-        """Forward pass through the saved model."""
+        """Forward pass through the saved model with forecast window iterations."""
         print(f"[Debug]: Forward - input requires_grad: {x.requires_grad}")
         print(f"[Debug]: Forward - input grad_fn: {x.grad_fn}")
         print(f"[Debug]: Forward - input shape: {x.shape}")
@@ -80,25 +80,37 @@ class Glonet(pl.LightningModule):
                 print(f"[Debug]: Moving input from {x.device} to {model_device}")
                 x = x.to(model_device)
             
-            print(f"[Debug]: About to call saved_model forward...")
+            print(f"[Debug]: About to call saved_model forward with forecast iterations...")
             
-            # Store original input for gradient connection
-            original_input = x
+            # Unstandardize input for the model (gradients will flow through this)
+            x_unstd = x * self.std + self.mean
+            print(f"[Debug]: Unstandardized input shape: {x_unstd.shape}")
             
-            # unstandardize
-            x_std = original_input * self.std + self.mean
+            # Get forecast horizon from config (default to 3 if not available)
+            forecast_horizon = 3  # default
+            if hasattr(self, 'cfg') and self.cfg and hasattr(self.cfg, 'training'):
+                forecast_horizon = getattr(self.cfg.training.datamodule, 'forecast_horizon', 3)
+            print(f"[Debug]: Using forecast_horizon: {forecast_horizon}")
             
-            output = self.saved_model(x_std)  # Add batch dimension if needed
-            print(f"[Debug]: Forward - output requires_grad: {output.requires_grad}")
-            print(f"[Debug]: Forward - output grad_fn: {output.grad_fn}")
-            print(f"[Debug]: Forward - output shape: {output.shape}")
+            # Run saved_model repeatedly for forecast window
+            np_in = x_unstd  # Use unstandardized input
+            for i in range(1, int((forecast_horizon + 1) / 2) + 1):
+                np_in = np_in if i == 1 else output
+                # Ensure input is on correct device before passing to model
+                np_in = np_in.to(model_device)
+                output = self.saved_model(np_in)
+                print(f"[Debug]: Forward iteration {i} completed, output shape: {output.shape}")
+            
+            print(f"[Debug]: Forward - final output requires_grad: {output.requires_grad}")
+            print(f"[Debug]: Forward - final output grad_fn: {output.grad_fn}")
+            print(f"[Debug]: Forward - final output shape: {output.shape}")
             
             # CRITICAL FIX: If JIT model breaks gradients, create artificial connection
-            if not output.requires_grad and x_std.requires_grad:
+            if not output.requires_grad and x.requires_grad:
                 print(f"[Debug]: JIT model broke gradient flow! Creating artificial connection...")
                 # Add a tiny identity operation that preserves gradients
                 # This creates a connection between input and output in the computation graph
-                output = output + 0.0 * x_std.sum() * 0.0  # Mathematically equivalent to output
+                output = output + 0.0 * x.sum() * 0.0  # Use original standardized input x
                 print(f"[Debug]: Fixed output requires_grad: {output.requires_grad}")
                 print(f"[Debug]: Fixed output grad_fn: {output.grad_fn}")
             
@@ -132,7 +144,7 @@ class Glonet(pl.LightningModule):
         # For JIT models, we might need to explicitly enable gradients
         with torch.enable_grad():
             output = self.forward(self.init_input)
-            y_hat = output[0, 0] + self.init_input.sum() * 0.0  # Ensure gradient connection
+            y_hat = output[0, 1] + self.init_input.sum() * 0.0  # Ensure gradient connection
             y_hat_std = (y_hat - self.mean.squeeze(0)) / self.std.squeeze(0)
         print(f"[Debug]: After forward pass:")
         print(f"[Debug]: y_hat requires_grad: {y_hat.requires_grad}")
@@ -202,19 +214,19 @@ class Glonet(pl.LightningModule):
         self.mean = dataset.mean.to(self.device)
         self.std = dataset.std.to(self.device)
         
-        # Get the raw input sequence and target directly from dataset (not standardized)
+        # Already standardized in dataset
         input_sequence = dataset.input_sequence
         target = dataset.target
-        
-        x = torch.nan_to_num(input_sequence, nan=0.0, posinf=1e6, neginf=-1e6).to(self.device)
-        y = torch.nan_to_num(target, nan=0.0, posinf=1e6, neginf=-1e6).to(self.device)
+
+        x = torch.nan_to_num(input_sequence, nan=0.0, posinf=1e6, neginf=-1e6).to(self.device) # Already standardized in dataset
+        y = torch.nan_to_num(target, nan=0.0, posinf=1e6, neginf=-1e6).to(self.device) # Already standardized in dataset
         
         # Move model to device as well
         self.saved_model.to(self.device)
         
-        # Create Parameter for optimization - this is what we'll optimize
+        # Create Parameter for optimization - keep this standardized so gradients flow
         self.init_input = nn.Parameter(x.detach().clone().unsqueeze(0), requires_grad=True)
-        self.target = (y - self.mean.squeeze(0)) / self.std.squeeze(0)  # Standardize target
+        self.target = y
         
         print(f"[Debug]: Created init_input parameter for optimization")
         print(f"[Debug]: init_input requires_grad={self.init_input.requires_grad}")
@@ -251,8 +263,12 @@ class Glonet(pl.LightningModule):
         if self.current_loss < self.best_loss:
             self.best_loss = self.current_loss
 
-            # Save the optimized input
-            self.best_init = self.init_input.clone().detach().cpu().numpy().squeeze(0)
+            # Save the optimized input (keep as tensor for unstandardization)
+            best_init_tensor = self.init_input.clone().detach().squeeze(0)
+            # Unstandardize using tensor operations
+            best_init_unstd = best_init_tensor * self.std + self.mean
+            # Convert to numpy after unstandardization
+            self.best_init = best_init_unstd.cpu().numpy()
 
     def configure_optimizers(self) -> Dict[str, Any]:
         """No Lightning-managed optimizers; created in on_train_start after we have the sample."""
@@ -329,7 +345,7 @@ class Glonet(pl.LightningModule):
                 name="data"
             )
 
-            return np_out[0], data_array.to_dataset()
+            return np_out[1], data_array.to_dataset()
 
 
 class OptimizeInitialConditionDataset(torch.utils.data.Dataset):

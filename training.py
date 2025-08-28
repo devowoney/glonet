@@ -175,24 +175,24 @@ def main(cfg : DictConfig):
     model.eval()
     with torch.no_grad():
         # Ensure tensors and model are on same device
-        original_input_device = original_input.to(device).unsqueeze(0)
-        optimized_input_device = optimized_input.to(device).unsqueeze(0)  # Add batch dimension
-        target_device = target.to(device).unsqueeze(0)  # Add batch dimension for target too
+        original_input_deviced = original_input.to(device).unsqueeze(0)
+        optimized_input_deviced = optimized_input.to(device).unsqueeze(0)  # Add batch dimension
+        target_deviced = target.to(device).unsqueeze(0)  # Add batch dimension for target too
         try:
             model.saved_model = model.saved_model.to(device)
         except Exception:
             pass
         print(f"[Debug] : model device = {next(model.saved_model.parameters()).device}")
-        print(f"[Debug] : original_input_device device = {original_input_device.device}")
-        print(f"[Debug] : optimized_input_device device = {optimized_input_device.device}")
-        print(f"[Debug] : target_device device = {target_device.device}")
+        print(f"[Debug] : original_input_device device = {original_input_deviced.device}")
+        print(f"[Debug] : optimized_input_device device = {optimized_input_deviced.device}")
+        print(f"[Debug] : target_device device = {target_deviced.device}")
         
-        original_prediction, original_prediction_nc = model.forecast(original_input_device)
-        optimized_prediction, optimized_prediction_nc = model.forecast(optimized_input_device)
+        original_prediction, original_prediction_nc = model.forecast(original_input_deviced)
+        optimized_prediction, optimized_prediction_nc = model.forecast(optimized_input_deviced)
 
-        original_loss = F.mse_loss(original_prediction, target_device)
-        optimized_loss = F.mse_loss(optimized_prediction, target_device)
-        
+        original_loss = F.mse_loss(original_prediction, target_deviced)
+        optimized_loss = F.mse_loss(optimized_prediction, target_deviced)
+
         improvement = (original_loss - optimized_loss).item()
         improvement_percent = (improvement / original_loss.item()) * 100
         

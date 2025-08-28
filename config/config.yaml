@@ -8,7 +8,7 @@ defaults:
   # - model: glonet 
   - training: default
 
-run_name: outputfix
+run_name: standard_fix
 hydra:
   run:
     dir: ./outputs/${now:%Y-%m-%d}/${run_name}_${now:%H%M%S}
