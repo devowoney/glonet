@@ -81,30 +81,30 @@ class Glonet(pl.LightningModule):
                 x = x.to(model_device)
             
             print(f"[Debug]: About to call saved_model forward with forecast iterations...")
-            
-            # Unstandardize input for the model (gradients will flow through this)
-            x_unstd = x * self.std + self.mean
-            print(f"[Debug]: Unstandardized input shape: {x_unstd.shape}")
-            
-            # Get forecast horizon from config (default to 3 if not available)
-            forecast_horizon = 3  # default
-            if hasattr(self, 'cfg') and self.cfg and hasattr(self.cfg, 'training'):
-                forecast_horizon = getattr(self.cfg.training.datamodule, 'forecast_horizon', 3)
-            print(f"[Debug]: Using forecast_horizon: {forecast_horizon}")
-            
-            # Run saved_model repeatedly for forecast window
-            np_in = x_unstd  # Use unstandardized input
-            for i in range(1, int((forecast_horizon + 1) / 2) + 1):
-                np_in = np_in if i == 1 else output
-                # Ensure input is on correct device before passing to model
-                np_in = np_in.to(model_device)
-                output = self.saved_model(np_in)
-                print(f"[Debug]: Forward iteration {i} completed, output shape: {output.shape}")
-            
-            print(f"[Debug]: Forward - final output requires_grad: {output.requires_grad}")
-            print(f"[Debug]: Forward - final output grad_fn: {output.grad_fn}")
-            print(f"[Debug]: Forward - final output shape: {output.shape}")
-            
+            with torch.enable_grad():
+                # Unstandardize input for the model (gradients will flow through this)
+                x_unstd = x * self.std + self.mean
+                print(f"[Debug]: Unstandardized input shape: {x_unstd.shape}")
+                
+                # Get forecast horizon from config (default to 3 if not available)
+                forecast_horizon = 3  # default
+                if hasattr(self, 'cfg') and self.cfg and hasattr(self.cfg, 'training'):
+                    forecast_horizon = getattr(self.cfg.training.datamodule, 'forecast_horizon', 3)
+                print(f"[Debug]: Using forecast_horizon: {forecast_horizon}")
+                
+                # Run saved_model repeatedly for forecast window
+                np_in = x_unstd  # Use unstandardized input
+                for i in range(1, int((forecast_horizon + 1) / 2) + 1):
+                    np_in = np_in if i == 1 else output
+                    # Ensure input is on correct device before passing to model
+                    np_in = np_in.to(model_device)
+                    output = self.saved_model(np_in)
+                    print(f"[Debug]: Forward iteration {i} completed, output shape: {output.shape}")
+                
+                print(f"[Debug]: Forward - final output requires_grad: {output.requires_grad}")
+                print(f"[Debug]: Forward - final output grad_fn: {output.grad_fn}")
+                print(f"[Debug]: Forward - final output shape: {output.shape}")
+                
             # CRITICAL FIX: If JIT model breaks gradients, create artificial connection
             if not output.requires_grad and x.requires_grad:
                 print(f"[Debug]: JIT model broke gradient flow! Creating artificial connection...")
@@ -144,7 +144,7 @@ class Glonet(pl.LightningModule):
         # For JIT models, we might need to explicitly enable gradients
         with torch.enable_grad():
             output = self.forward(self.init_input)
-            y_hat = output[0, 1] + self.init_input.sum() * 0.0  # Ensure gradient connection
+            y_hat = output[0, 1] # + self.init_input.sum() * 0.0  # Ensure gradient connection
             y_hat_std = (y_hat - self.mean.squeeze(0)) / self.std.squeeze(0)
         print(f"[Debug]: After forward pass:")
         print(f"[Debug]: y_hat requires_grad: {y_hat.requires_grad}")
