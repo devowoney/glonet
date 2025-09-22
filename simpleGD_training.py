@@ -155,7 +155,7 @@ def main(cfg : DictConfig):
     x_param = torch.nn.Parameter(x_init, requires_grad=True)
     
     # Define optimizer
-    optimizer = torch.optim.SGD([x_param], lr=1e5, momentum=0.7)
+    optimizer = torch.optim.SGD([x_param], lr=1e7, momentum=0.7)
     
     # Reset gradients
     src_model.zero_grad()
@@ -164,7 +164,7 @@ def main(cfg : DictConfig):
     print(f'start x norm: {start_norm:.6f}')
 
     # small training loop
-    steps = 1000
+    steps = 100
     for i in range(steps):
         optimizer.zero_grad()
         out = src_model(x_param)
@@ -172,8 +172,9 @@ def main(cfg : DictConfig):
         loss = torch.nn.functional.mse_loss(out, target)  # normalized loss
         loss.backward()
 
-        grad_norm = x_param.grad.norm().item() if x_param.grad is not None else float('nan')
-        print(f'step {i:02d} loss={loss.item():.6e} x.grad_norm={grad_norm:.6e} x.norm={x_param.data.norm().item():.6f}')
+        if i % 100 == 0 or i == steps - 1:
+            grad_norm = x_param.grad.norm().item() if x_param.grad is not None else float('nan')
+            print(f'step {i:02d} loss={loss.item():.6e} x.grad_norm={grad_norm:.6e} x.norm={x_param.data.norm().item():.6f}')
 
         optimizer.step()
 
@@ -181,6 +182,49 @@ def main(cfg : DictConfig):
     print(f'end x norm: {end_norm:.6f} (changed by {end_norm - start_norm:.6f})')
     print('final x_param.requires_grad:', x_param.requires_grad)
     print('out_t.requires_grad:', getattr(out, 'requires_grad', None), 'out_t.grad_fn:', getattr(out, 'grad_fn', None))
+    
+    # Destandardize and move to numpy
+    best_array = (x_param.detach().clone().cpu().numpy() * std.cpu().numpy()) + mean.cpu().numpy()
+
+    # If a batch dimension exists (we unsqueezed earlier), remove it so dims are (time, channel, lat, lon)
+    if best_array.ndim == 5:
+        best_array = best_array.squeeze(0)
+
+    # Retrieve coordinates from the original xarray dataset stored on the dataset object
+    ds = data_module.train_dataset.dataset
+    seq_len = getattr(data_module.train_dataset, 'sequence_length', None)
+    target_idx = getattr(data_module.train_dataset, 'target_idx', None)
+
+    if seq_len is not None and target_idx is not None:
+        # start_idx used when building the sample in the dataset
+        start_idx = int(target_idx - seq_len - data_module.train_dataset.forecast_horizon + 1)
+        time_coords = ds.time.isel(time=slice(start_idx, start_idx + seq_len))
+    else:
+        print("[Warning]: sequence_length or target_idx not found in dataset attributes.")
+
+    # spatial coords (handle both names)
+    lat = ds.coords.get('lat', ds.coords.get('latitude'))
+    lon = ds.coords.get('lon', ds.coords.get('longitude'))
+
+    # Create xarray Dataset and save
+    # dims expected: ('time','channel','lat','lon')
+    data_array = xr.DataArray(
+        best_array,
+        dims=["time", "channel", "lat", "lon"],
+        coords={
+            "time": time_coords,
+            "lat": lat,
+            "lon": lon,
+            "channel": np.arange(best_array.shape[1])
+        },
+        name="data"
+    )
+    ds_out = data_array.to_dataset()
+    ds_out.attrs["description"] = "Optimized initial condition (destandardized)"
+    windows = cfg.training.datamodule.forecast_horizon
+    ds_out.to_netcdf(f"SGDoptimized_init_input{state_number}_{date}_{windows}_days_window.nc")
+    
+    print(f"Saved: Optimized input at ./SGDoptimized_init_input{state_number}_{date}_{windows}_days_window.nc")
     
     return x_param.detach().clone().cpu().numpy()
 
