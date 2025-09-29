@@ -381,7 +381,7 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset):
         self._make_valid_indices()
         
         # Get the specific sample
-        self.input_sequence, self.target, self.selected_date = self._get_sample()
+        self.input_sequence, self.target, self.selected_date, self.land_mask = self._get_sample()
         
         # Standardization
         self.mean, self.std = self._standardize()
@@ -416,7 +416,7 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset):
 
         print(f"Indices calculated {self.input_file} successfully")
             
-    def _get_sample(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _get_sample(self) -> Tuple[torch.Tensor, torch.Tensor, str, torch.Tensor]:
         """Get the specific sample to optimize."""
         
         if self.sample_index >= len(self.valid_indices):
@@ -428,6 +428,11 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset):
         
         self.target_idx = start_idx + self.sequence_length + self.forecast_horizon - 1
         target = self.data[self.target_idx]
+        
+        # Create land mask: 0 for land (NaN), 1 for ocean (valid values)
+        # Check for NaN values before converting them to numbers
+        land_mask = (~torch.isnan(target)).float()  # True for ocean (not NaN), False for land (NaN)
+        
         target = torch.nan_to_num(target)
         
         # Extract the date for this specific sample
@@ -445,8 +450,11 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset):
         print("[Debug]: Fetched Dataset successfully.")
         print(f"[Debug]: input_sequence shape is : {input_sequence.shape}")
         print(f"[Debug]: target shape is : {target.shape}")
+        print(f"[Debug]: land_mask shape is : {land_mask.shape}")
+        print(f"[Debug]: Ocean points (mask=1): {land_mask.sum().item()}")
+        print(f"[Debug]: Land points (mask=0): {(land_mask == 0).sum().item()}")
         
-        return input_sequence, target, selected_date
+        return input_sequence, target, selected_date, land_mask
 
     def _standardize(self) :
 

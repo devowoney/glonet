@@ -6,7 +6,7 @@
 
 
 datamodule:
-  forecast_horizon: 3
+  forecast_horizon: 1
   batch_size: 1
   num_workers: 0
 

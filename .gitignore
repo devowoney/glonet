@@ -10,3 +10,4 @@ outputs/
 sb_*.sh
 src/__pycache__/
 __pycache__/
+*.nc
