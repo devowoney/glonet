@@ -191,7 +191,7 @@ def add_metadata(ds, date):
     return ds
 
 def aforecast(d, date, cycle : int):
-    from utility import get_denormalizer1, get_normalizer1
+    from .utility import get_denormalizer1, get_normalizer1
 
     denormalizer = get_denormalizer1(MODEL_LOCATION)
     normalizer = get_normalizer1(MODEL_LOCATION)
@@ -240,7 +240,7 @@ def aforecast(d, date, cycle : int):
     return datasets
 
 def aforecast2(d, date, cycle):
-    from utility import get_denormalizer2, get_normalizer2
+    from .utility import get_denormalizer2, get_normalizer2
 
     denormalizer = get_denormalizer2(MODEL_LOCATION)
     normalizer = get_normalizer2(MODEL_LOCATION)
@@ -291,7 +291,7 @@ def aforecast2(d, date, cycle):
 
 
 def aforecast3(d, date, cycle):
-    from utility import get_denormalizer3, get_normalizer3
+    from .utility import get_denormalizer3, get_normalizer3
 
     denormalizer = get_denormalizer3(MODEL_LOCATION)
     normalizer = get_normalizer3(MODEL_LOCATION)

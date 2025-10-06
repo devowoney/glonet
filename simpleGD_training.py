@@ -11,12 +11,20 @@ from pathlib import Path
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+from parameter_mapping_utils import *
+
 # Add the src directory to the path
 sys.path.append(str(Path(__file__).parent / "src"))
 
 from optimInitLit import GlorysDataModule
 from glonet import Glonet
+# Make the package's folder importable as top-level so legacy "from utility import ..." works.
+sys.path.insert(0, str(Path(__file__).parent / "glonet_daily_forecast_local"))
+
+# existing: add 'src' too if you need it
+sys.path.insert(0, str(Path(__file__).parent / "src"))
 from glonet_daily_forecast_local.forecast import aforecast, aforecast2, aforecast3
+from glonet_daily_forecast_local import utility
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(cfg : DictConfig):
@@ -43,6 +51,11 @@ def main(cfg : DictConfig):
     print(f"Model: {model_path}")
     print(f"Input file: {input_file}")
     print(f"Sample index: {sample_index}")
+
+
+
+
+
     
     
     # =============================================================================================== Data
@@ -77,51 +90,63 @@ def main(cfg : DictConfig):
         print(f"CUDA error detected: {e}. Using CPU.")
     
     
+
+
+
     
     
     # =============================================================================================== Model
     # =====================================================================================================
-    # Initialize model with the actual input sequence as the trainable parameter
+    # Load JIT model and copy parameters to source model
+    print("=== Loading JIT Model and Copying Parameters ===")
     model = torch.jit.load(model_path).to(device)
-    src_model = Glonet(dim=(2, 5, 672, 1440)).to(device) # <========================== TODO : Change ch from input 
-    print(f"[Debug]: Loaded model from {model_path} and {src_model} from < ./src >")
+    src_model = Glonet(dim=(2, 5, 672, 1440)).to(device)
+    print(f"[Debug]: Loaded JIT model from {model_path}")
     
-    # Copy weights from saved glonet to original source model
-    # collect source params/buffers
-    src_params = {n: p for n, p in model.named_parameters()} if hasattr(model, 'named_parameters') else {}
-    src_bufs   = {n: b for n, b in model.named_buffers()}    if hasattr(model, 'named_buffers')    else {}
-
-    copied = []
-    with torch.no_grad():
-        for name, tgt in src_model.named_parameters():
-            src = src_params.get(name)
-            if src is None:
-                continue
-            if tuple(src.shape) == tuple(tgt.shape):
-                tgt.copy_(src.to(tgt.device).to(tgt.dtype))
-                copied.append(name)
-
-        for name, tgt in src_model.named_buffers():
-            src = src_bufs.get(name)
-            if src is None:
-                continue
-            if tuple(src.shape) == tuple(tgt.shape):
-                tgt.copy_(src.to(tgt.device).to(tgt.dtype))
-
-    print("params copied by name:", len(copied))
+    model.eval()
+    src_model.eval()
     
-    # build lists of remaining src/tgt tensors
-    remaining_src = [p for n, p in src_params.items() if n not in set(copied)]
-    remaining_tgt = [(n, p) for n, p in src_model.named_parameters() if n not in set(copied)]
-
+    # Analyze parameter structures
+    jit_shape, src_shape = analyze_parameter_structures(model, src_model)
+    print(f"[Debug]: JIT model parameter shapes: {jit_shape}")
+    print(f"[Debug]: Source model parameter shapes: {src_shape}")
+    
+    # Copy parameters from JIT model to source model
+    print(f"[Debug]: Copying parameters from JIT to source model")
+    copied_count = copy_parameters_by_shape_order(model, src_model)
+    
+    # If shape-based copying didn't work well, try the enhanced approach
+    if copied_count == 0:
+        print("[Warning] Shape-based copying failed. Trying enhanced approach...")
+        from parameter_mapping_utils import copy_jit_to_pytorch_enhanced
+        copied_count = copy_jit_to_pytorch_enhanced(model, src_model)
+    
+    model.to('cpu')
+    
+    
+    # Verify the model works
+    print("\n=== Testing Model Functionality ===")
+    test_input = torch.randn(1, 2, 5, 672, 1440).to(device)
+    src_model.eval()
+    
     with torch.no_grad():
-        for tgt_name, tgt in remaining_tgt:
-            for i, src in enumerate(remaining_src):
-                if tuple(src.shape) == tuple(tgt.shape):
-                    tgt.copy_(src.to(tgt.device).to(tgt.dtype))
-                    print(f"copied by shape: {tgt_name} <- src_index_{i} shape={src.shape}")
-                    remaining_src.pop(i)
-                    break
+        try:
+            output = src_model(test_input)
+            print(f"[SUCCESS] ✓ Model inference successful! Output shape: {output.shape}")
+            
+            # Verify parameter copying worked by comparing outputs
+            print("\n=== Verifying Parameter Copy ===")
+            from parameter_mapping_utils import verify_model_equivalence
+            equivalence_verified = verify_model_equivalence(model, src_model, test_input)
+            
+            if not equivalence_verified:
+                print("[WARNING] Models don't produce identical outputs. Parameter copying may have issues.")
+            
+        except Exception as e:
+            print(f"[ERROR] Model inference failed: {e}")
+            raise e
+    
+    print("=== Model Loading Complete ===\n")
     
     # Confirm data and model are in gpu
     try:
@@ -141,8 +166,31 @@ def main(cfg : DictConfig):
         std = std.to(device)
         land_mask = land_mask.to(device)
     
-    # Delete loaded model for gpu memory
-    model.to('cpu')
+    ## debug
+    ds = data_module.train_dataset.dataset
+    lat = ds.coords.get('lat', ds.coords.get('latitude'))
+    lon = ds.coords.get('lon', ds.coords.get('longitude'))
+    time_coords = ds.time.isel(time=slice(1, 3))
+    
+    testout = src_model(input_sequence)
+    print(f"[Debug]: testout shape: {testout.shape}")
+    test_array = xr.DataArray(
+        testout.detach().clone().cpu().numpy().squeeze(0),
+        dims=["channel", "lat", "lon"],
+        coords={
+            # "time": time_coords,
+            "lat": lat,
+            "lon": lon,
+            "channel": np.arange(testout.shape[1])
+        },
+        name="data"
+    )
+
+    test_array.to_dataset().to_netcdf(f"TestDataSet_test.nc")
+    print(f"Saved: Test dataset at ./TestDataSet_test.nc")
+
+
+    del model, test_input, testout, test_array
     torch.cuda.empty_cache()
 
 
@@ -152,7 +200,8 @@ def main(cfg : DictConfig):
     # Freeze model parameters
     for p in src_model.parameters():
         p.requires_grad = False
-    src_model.eval()
+    src_model.train()
+    print(f"[Debug]: model.training: {src_model.training}")
 
     # input to param for gradient flow
     x_init = input_sequence.detach().clone().to(device)
@@ -167,7 +216,7 @@ def main(cfg : DictConfig):
     print(f"[Debug]: Ocean points in mask: {expanded_mask.sum().item()}")
 
     # Define forecast function for multiple steps (retrorepetive)
-    def gloent_forecast(x : torch.Tensor) -> torch.Tensor:
+    def glonet_forecast(x : torch.Tensor) -> torch.Tensor:
         
         for i in range(cfg.training.datamodule.forecast_horizon):
             glo_out = src_model(x.to(device))
@@ -197,7 +246,7 @@ def main(cfg : DictConfig):
         if x_param.grad is not None:
             x_param.grad.zero_()
         
-        out = gloent_forecast(x_param)
+        out = glonet_forecast(x_param)
         
         loss = torch.nn.functional.mse_loss(out, target)  # normalized loss
         loss.backward()
@@ -268,15 +317,22 @@ def main(cfg : DictConfig):
     
     print(f"Saved: Optimized input at ./SGDoptimized_init_input{state_number}_{date}_{windows}_days_window.nc")
 
+
+
+
+
+
+
+
     # ============================================================================================= Validation
     # ========================================================================================================
 
     y = (target.detach().clone().cpu().numpy() * std.cpu().numpy()) + mean.cpu().numpy()
     print(f"[Debug]: y shape: {y.shape}")
-    y_hat = (gloent_forecast(x_init).detach().clone().cpu().numpy() * std.cpu().numpy()) + mean.cpu().numpy()
+    y_hat = (glonet_forecast(x_init).detach().clone().cpu().numpy() * std.cpu().numpy()) + mean.cpu().numpy()
     y_hat = y_hat.squeeze(0)  # Remove batch dim if exists
     print(f"[Debug]: y_hat shape: {y_hat.shape}")
-    optimized_forecast = gloent_forecast(x_param)
+    optimized_forecast = glonet_forecast(x_param)
     y_tilda_hat = (optimized_forecast.detach().clone().cpu().numpy() * std.cpu().numpy()) + mean.cpu().numpy()
     y_tilda_hat = y_tilda_hat.squeeze(0)  # Remove batch dim if exists
     print(f"[Debug]: y_tilda_hat shape: {y_tilda_hat.shape}")
