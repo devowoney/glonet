@@ -100,53 +100,55 @@ def main(cfg : DictConfig):
     # Load JIT model and copy parameters to source model
     print("=== Loading JIT Model and Copying Parameters ===")
     model = torch.jit.load(model_path).to(device)
-    src_model = Glonet(dim=(2, 5, 672, 1440)).to(device)
-    print(f"[Debug]: Loaded JIT model from {model_path}")
+    # src_model = Glonet(dim=(2, 5, 672, 1440)).to(device)
+    # print(f"[Debug]: Loaded JIT model from {model_path}")
     
-    model.eval()
-    src_model.eval()
+    # model.eval()
+    # src_model.eval()
     
-    # Analyze parameter structures
-    jit_shape, src_shape = analyze_parameter_structures(model, src_model)
-    print(f"[Debug]: JIT model parameter shapes: {jit_shape}")
-    print(f"[Debug]: Source model parameter shapes: {src_shape}")
+    # # Analyze parameter structures
+    # jit_shape, src_shape = analyze_parameter_structures(model, src_model)
+    # print(f"[Debug]: JIT model parameter shapes: {jit_shape}")
+    # print(f"[Debug]: Source model parameter shapes: {src_shape}")
     
-    # Copy parameters from JIT model to source model
-    print(f"[Debug]: Copying parameters from JIT to source model")
-    copied_count = copy_parameters_by_shape_order(model, src_model)
+    # # Copy parameters from JIT model to source model
+    # print(f"[Debug]: Copying parameters from JIT to source model")
+    # copied_count = copy_parameters_by_shape_order(model, src_model)
     
-    # If shape-based copying didn't work well, try the enhanced approach
-    if copied_count == 0:
-        print("[Warning] Shape-based copying failed. Trying enhanced approach...")
-        from parameter_mapping_utils import copy_jit_to_pytorch_enhanced
-        copied_count = copy_jit_to_pytorch_enhanced(model, src_model)
+    # # If shape-based copying didn't work well, try the enhanced approach
+    # if copied_count == 0:
+    #     print("[Warning] Shape-based copying failed. Trying enhanced approach...")
+    #     from parameter_mapping_utils import copy_jit_to_pytorch_enhanced
+    #     copied_count = copy_jit_to_pytorch_enhanced(model, src_model)
     
-    model.to('cpu')
+    # model.to('cpu')
     
     
-    # Verify the model works
-    print("\n=== Testing Model Functionality ===")
-    test_input = torch.randn(1, 2, 5, 672, 1440).to(device)
-    src_model.eval()
+    # # Verify the model works
+    # print("\n=== Testing Model Functionality ===")
+    # test_input = torch.randn(1, 2, 5, 672, 1440).to(device)
+    # src_model.eval()
     
-    with torch.no_grad():
-        try:
-            output = src_model(test_input)
-            print(f"[SUCCESS] ✓ Model inference successful! Output shape: {output.shape}")
+    # with torch.no_grad():
+    #     try:
+    #         output = src_model(test_input)
+    #         print(f"[SUCCESS] ✓ Model inference successful! Output shape: {output.shape}")
             
-            # Verify parameter copying worked by comparing outputs
-            print("\n=== Verifying Parameter Copy ===")
-            from parameter_mapping_utils import verify_model_equivalence
-            equivalence_verified = verify_model_equivalence(model, src_model, test_input)
+    #         # Verify parameter copying worked by comparing outputs
+    #         print("\n=== Verifying Parameter Copy ===")
+    #         from parameter_mapping_utils import verify_model_equivalence
+    #         equivalence_verified = verify_model_equivalence(model, src_model, test_input)
             
-            if not equivalence_verified:
-                print("[WARNING] Models don't produce identical outputs. Parameter copying may have issues.")
+    #         if not equivalence_verified:
+    #             print("[WARNING] Models don't produce identical outputs. Parameter copying may have issues.")
             
-        except Exception as e:
-            print(f"[ERROR] Model inference failed: {e}")
-            raise e
+    #     except Exception as e:
+    #         print(f"[ERROR] Model inference failed: {e}")
+    #         raise e
     
-    print("=== Model Loading Complete ===\n")
+    # print("=== Model Loading Complete ===\n")
+    
+    src_model = model
     
     # Confirm data and model are in gpu
     try:
@@ -176,12 +178,12 @@ def main(cfg : DictConfig):
     print(f"[Debug]: testout shape: {testout.shape}")
     test_array = xr.DataArray(
         testout.detach().clone().cpu().numpy().squeeze(0),
-        dims=["channel", "lat", "lon"],
+        dims=["time", "channel", "lat", "lon"],
         coords={
-            # "time": time_coords,
+            "time": time_coords,
             "lat": lat,
             "lon": lon,
-            "channel": np.arange(testout.shape[1])
+            "channel": np.arange(testout.shape[2])
         },
         name="data"
     )
@@ -190,7 +192,8 @@ def main(cfg : DictConfig):
     print(f"Saved: Test dataset at ./TestDataSet_test.nc")
 
 
-    del model, test_input, testout, test_array
+    # del model, test_input, testout, test_array
+    del model, testout, test_array
     torch.cuda.empty_cache()
 
 
@@ -205,7 +208,8 @@ def main(cfg : DictConfig):
 
     # input to param for gradient flow
     x_init = input_sequence.detach().clone().to(device)
-    x_param = torch.nn.Parameter(x_init, requires_grad=True)
+    # x_param = torch.nn.Parameter(x_init, requires_grad=True)
+    x_param = torch.autograd.Variable(x_init, requires_grad=True)
     
     # Expand land_mask to match x_param dimensions (batch, time, channel, lat, lon)
     # land_mask has shape (channel, lat, lon), x_param has shape (batch, time, channel, lat, lon)
@@ -239,35 +243,38 @@ def main(cfg : DictConfig):
     start_norm = x_param.data.norm().item()
     print(f'start x norm: {start_norm:.6f}')
 
+    with torch.set_grad_enabled(True): 
     # small training loop with manual masked gradient updates
-    steps = 100
-    for i in range(steps):
-        # Zero gradients manually
-        if x_param.grad is not None:
-            x_param.grad.zero_()
-        
-        out = glonet_forecast(x_param)
-        
-        loss = torch.nn.functional.mse_loss(out, target)  # normalized loss
-        loss.backward()
-
-        # Manual gradient update with land mask
-        with torch.no_grad():
+        steps = 100
+        for i in range(steps):
+            # Zero gradients manually
             if x_param.grad is not None:
-                # Apply mask to gradients: only ocean points (mask=1) get updated
-                masked_grad = expanded_mask * x_param.grad
-                
-                # Apply momentum
-                velocity = momentum * velocity + masked_grad
-                
-                # Manual parameter update: x_new = x_old - learning_rate * (mask * grad)
-                x_param.data = x_param.data - learning_rate * velocity
+                x_param.grad.zero_()
+            
+            out = glonet_forecast(x_param)
+            
+            loss = torch.nn.functional.mse_loss(out, target)  # normalized loss
+            loss.backward()
 
-        if i % 100 == 0 or i == steps - 1:
-            grad_norm = x_param.grad.norm().item() if x_param.grad is not None else float('nan')
-            masked_grad_norm = (expanded_mask * x_param.grad).norm().item() if x_param.grad is not None else float('nan')
-            print(f'step {i:02d} loss={loss.item():.6e} full_grad_norm={grad_norm:.6e} '
-                  f'masked_grad_norm={masked_grad_norm:.6e} x.norm={x_param.data.norm().item():.6f}')
+            # Manual gradient update with land mask
+            with torch.no_grad():
+                if x_param.grad is not None:
+                    # Apply mask to gradients: only ocean points (mask=1) get updated
+                    masked_grad = expanded_mask * x_param.grad
+                    
+                    # Apply momentum
+                    velocity = momentum * velocity + masked_grad
+                    
+                    # Manual parameter update: x_new = x_old - learning_rate * (mask * grad)
+                    x_param.data = x_param.data - learning_rate * velocity
+                    
+                x_param = torch.autograd.Variable(x_param, requires_grad=True)
+                
+            if i % 100 == 0 or i == steps - 1:
+                grad_norm = x_param.grad.norm().item() if x_param.grad is not None else float('nan')
+                masked_grad_norm = (expanded_mask * x_param.grad).norm().item() if x_param.grad is not None else float('nan')
+                print(f'step {i:02d} loss={loss.item():.6e} full_grad_norm={grad_norm:.6e} '
+                    f'masked_grad_norm={masked_grad_norm:.6e} x.norm={x_param.data.norm().item():.6f}')
 
     end_norm = x_param.data.norm().item()
     print(f'end x norm: {end_norm:.6f} (changed by {end_norm - start_norm:.6f})')
