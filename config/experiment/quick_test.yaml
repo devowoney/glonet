@@ -5,6 +5,7 @@ defaults:
   - /training: fast
   - /data: default
   - override /hydra/job_logging: colorlog
+  - _self_
   
 experiment_name: "quick_test"
 seed: 123
