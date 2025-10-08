@@ -1,7 +1,7 @@
 # Main GLONET Configuration
 defaults:
   - model: glonet
-  - training: default
+  - training: lightning
   - data: default
   - _self_
 

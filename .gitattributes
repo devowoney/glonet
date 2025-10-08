@@ -1,0 +1,2 @@
+# Ensure text files use LF line endings in the repository
+* text=auto
