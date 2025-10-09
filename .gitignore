@@ -1,12 +1,14 @@
 glonet_daily_forecast_data_orchestration/src/__pycache__/
-glonet_daily_forecast_local/src/*.sh
-glonet_daily_forecast_local/src/*.ipynb
+glonet_daily_forecast_local/*.sh
+glonet_daily_forecast_local/*.ipynb
+glonet_daily_forecast_local/__pycache__/
 TrainedWeights/
 *.log
-glonet_daily_forecast_local/src/__pycahe__/
 tmp.ipynb
 output/
 sb_*.sh
 outputs/
 data/
 src/__pycache__/
+__pycache__/
+*.nc
