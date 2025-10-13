@@ -20,12 +20,11 @@ config/
 ├── model/                 # Model configurations
 │   ├── glonet.yaml       # Standard GLONET configuration
 │   └── glonet_small.yaml # Smaller model for testing
-├── training/              # Training configurations
-│   ├── default.yaml      # Default training settings
-│   └── fast.yaml         # Fast training for testing
-└── experiment/            # Pre-defined experiments
-    ├── quick_test.yaml    # Quick test experiment
-    └── ocean_full.yaml    # Full ocean forecasting experiment
+├── data/                 # Dataset configuration
+│   └── GLORYS12_0125.yaml # 1/4 interpolated data
+└── training/              # Training configurations
+   ├── default.yaml      # Default training settings
+   └── fast.yaml         # Fast training for testing
 ```
 
 ## Basic Usage
@@ -57,19 +56,7 @@ python train.py training=fast
 python train.py model=glonet_small training=fast
 ```
 
-### 3. Using Pre-defined Experiments
-
-Run complete experiment configurations:
-
-```bash
-# Quick test with small model and fast training
-python train.py --config-path=config/experiment --config-name=quick_test
-
-# Full ocean forecasting experiment
-python train.py --config-path=config/experiment --config-name=ocean_full
-```
-
-### 4. Overriding Configuration Parameters
+### 3. Overriding Configuration Parameters
 
 Override any parameter from the command line:
 
@@ -91,9 +78,6 @@ To start training with the full training script:
 ```bash
 # Basic training with default settings
 python train.py
-
-# Training with specific experiment
-python train.py --config-path=config/experiment --config-name=ocean_full
 
 # Training with overrides
 python train.py training.epochs=50 training.batch_size=8 model=glonet_small
@@ -159,25 +143,6 @@ use_amp: true
 grad_clip_norm: 1.0
 ```
 
-### 3. Create a New Experiment
-
-```yaml
-# config/experiment/my_experiment.yaml
-# @package _global_
-defaults:
-  - /model: my_model
-  - /training: my_training
-
-experiment_name: "my_custom_experiment"
-seed: 123
-
-# Override specific parameters
-training:
-  batch_size: 2  # Reduce for large model
-
-output_dir: "outputs/my_experiment"
-```
-
 ## Advanced Features
 
 ### 1. Hyperparameter Sweeps
@@ -224,9 +189,8 @@ outputs/
 
 1. **Use composition**: Break configurations into reusable components
 2. **Name configurations clearly**: Use descriptive names for different variants
-3. **Document experiments**: Use the experiment configs for reproducible research
-4. **Version control**: Keep all configuration files in version control
-5. **Test configurations**: Use the quick_test experiment to validate changes
+3. **Version control**: Keep all configuration files in version control
+4. **Quick debug**: Use small model and fast config to check your modifications
 
 ## Troubleshooting
 
