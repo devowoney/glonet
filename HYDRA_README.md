@@ -23,9 +23,6 @@ config/
 ├── training/              # Training configurations
 │   ├── default.yaml      # Default training settings
 │   └── fast.yaml         # Fast training for testing
-├── data/                  # Data configurations
-│   ├── default.yaml      # Default data settings
-│   └── ocean.yaml        # Ocean-specific data settings
 └── experiment/            # Pre-defined experiments
     ├── quick_test.yaml    # Quick test experiment
     └── ocean_full.yaml    # Full ocean forecasting experiment
@@ -38,13 +35,12 @@ config/
 Run the example script to test your setup:
 
 ```bash
-python example.py
+python train.py
 ```
 
 This will:
 - Load the default configuration
 - Create a GLONET model
-- Test it with dummy data
 
 ### 2. Using Different Configurations
 
@@ -52,16 +48,13 @@ You can specify different configurations using Hydra's command line interface:
 
 ```bash
 # Use small model for testing
-python example.py model=glonet_small
+python train.py model=glonet_small
 
 # Use fast training settings
-python example.py training=fast
-
-# Use ocean-specific data configuration
-python example.py data=ocean
+python train.py training=fast
 
 # Combine multiple configurations
-python example.py model=glonet_small training=fast data=ocean
+python train.py model=glonet_small training=fast
 ```
 
 ### 3. Using Pre-defined Experiments
@@ -70,10 +63,10 @@ Run complete experiment configurations:
 
 ```bash
 # Quick test with small model and fast training
-python example.py --config-path=config/experiment --config-name=quick_test
+python train.py --config-path=config/experiment --config-name=quick_test
 
 # Full ocean forecasting experiment
-python example.py --config-path=config/experiment --config-name=ocean_full
+python train.py --config-path=config/experiment --config-name=ocean_full
 ```
 
 ### 4. Overriding Configuration Parameters
@@ -106,24 +99,6 @@ python train.py --config-path=config/experiment --config-name=ocean_full
 python train.py training.epochs=50 training.batch_size=8 model=glonet_small
 ```
 
-## Configuration Management Utilities
-
-Use the configuration utility script to manage your configurations:
-
-```bash
-# List all available configurations
-python config_utils.py list
-
-# Print a specific configuration
-python config_utils.py print config/model/glonet.yaml
-
-# Validate a configuration file
-python config_utils.py validate config/config.yaml
-
-# Create a new configuration from template
-python config_utils.py create my_model --template model
-```
-
 ## Configuration Files Explained
 
 ### Main Configuration (`config/config.yaml`)
@@ -140,11 +115,6 @@ python config_utils.py create my_model --template model
 - Sets training hyperparameters
 - Defines optimizer and scheduler settings
 - Includes early stopping and gradient clipping options
-
-### Data Configuration (`config/data/default.yaml`)
-- Defines data loading parameters
-- Sets paths to input files
-- Includes preprocessing and augmentation settings
 
 ## Creating Custom Configurations
 
@@ -197,7 +167,6 @@ grad_clip_norm: 1.0
 defaults:
   - /model: my_model
   - /training: my_training
-  - /data: ocean
 
 experiment_name: "my_custom_experiment"
 seed: 123
@@ -272,7 +241,7 @@ outputs/
 
 - Check the configuration with: `python config_utils.py validate <config_path>`
 - Print configuration with: `python config_utils.py print <config_path>`
-- Use `python example.py --help` to see all available options
+- Use `python train.py --help` to see all available options
 
 
 ### Future work

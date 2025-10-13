@@ -3,7 +3,6 @@
 defaults:
   - /model: glonet_small
   - /training: fast
-  - /data: default
   - override /hydra/job_logging: colorlog
   - _self_
   

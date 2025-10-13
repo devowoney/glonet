@@ -12,6 +12,9 @@ from typing import Any, Dict
 import torch
 import torch.nn as nn
 import torch.utils.data
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import instantiate
@@ -19,11 +22,7 @@ from hydra.utils import instantiate
 # Add the src directory to the path
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from glonet import Glonet
-from blocks import *
-from NN import *
-from NO import *
-from dataset import XrDataset, create_xr_datasets
+from dataset import create_xr_datasets
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -67,26 +66,6 @@ class GlonetTrainer:
         """Build the GLONET model"""
         
         model_cfg = self.cfg.model
-        
-        # Extract parameters from config
-        # dim = model_cfg.dim
-        # dT = model_cfg.get('dT', 64)
-        # dS = model_cfg.get('dS', 64)
-        # NT = model_cfg.get('NT', 2)
-        # NS = model_cfg.get('NS', 8)
-        # ker = model_cfg.get('ker', [3, 5, 7])
-        # groups = model_cfg.get('groups', 8)
-        
-        # model = Glonet(
-        #     dim=dim,
-        #     dT=dT,
-        #     dS=dS,
-        #     NT=NT,
-        #     NS=NS,
-        #     ker=ker,
-        #     groups=groups,
-        #     device=self.device.type
-        # )
         
         return instantiate(model_cfg).to(self.device)
     
@@ -281,54 +260,35 @@ def create_data_loaders(cfg) -> tuple:
         log.error(f"Failed to create data loaders: {e}")
         sys.exit(1)
         
-        # log.warning(f"Failed to create XrDataset: {e}")
-        # log.info("Falling back to dummy data loader...")
-        
-        # Fallback to dummy data if XrDataset fails
-        # train_loader = create_dummy_data_loader(cfg, 'train')
-        # val_loader = create_dummy_data_loader(cfg, 'val')
-        # # test_loader = create_dummy_data_loader(cfg, 'test')
-        
-        # return train_loader, val_loader, test_loader
-
-
-# def create_dummy_data_loader(cfg: DictConfig, split: str = 'train'):
-#     """Create a dummy data loader for demonstration"""
-#     # This is a placeholder - replace with your actual data loading logic
-#     import torch.utils.data as data
-    
-#     batch_size = cfg.training.batch_size
-#     dim = cfg.model.dim
-    
-#     # Create dummy dataset
-#     class DummyDataset(data.Dataset):
-#         def __init__(self, size=1000):
-#             self.size = size
-            
-#         def __len__(self):
-#             return self.size
-            
-#         def __getitem__(self, idx):
-#             # Input shape: [T, C, H, W]
-#             input_data = torch.randn(*dim)
-#             # Target shape: [C, H, W] (forecast for first timestep)
-#             target_data = torch.randn(dim[1], dim[2], dim[3])
-#             return input_data, target_data
-    
-#     dataset = DummyDataset(size=800 if split == 'train' else 200)
-    
-#     return data.DataLoader(
-#         dataset,
-#         batch_size=batch_size,
-#         shuffle=(split == 'train'),
-#         num_workers=cfg.data.num_workers,
-#         pin_memory=cfg.data.pin_memory
-#     )
+        return train_loader, val_loader, test_loader
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(cfg : DictConfig) -> float:
     """Main training function"""
+    # Configuration for multiple ocean states
+    state_configs = {
+        1: {'model_file': 'glonet_p1.pt', 'input_file': 'input1.nc'},
+        2: {'model_file': 'glonet_p2.pt', 'input_file': 'input2.nc'},
+        3: {'model_file': 'glonet_p3.pt', 'input_file': 'input3.nc'}
+    }
+    
+    model_dir = cfg.model_dir
+    data_dir = cfg.data_dir 
+    state_number = cfg.state_number 
+    sample_index = cfg.sample_index 
+    
+    if state_number not in state_configs:
+        raise ValueError(f"Invalid state number: {state_number}. Choose 1, 2, or 3.")
+    
+    config = state_configs[state_number]
+    model_path = model_dir + "/" + config['model_file']
+    input_file = config['input_file']
+    
+    print(f"=== Optimizing Ocean State {state_number} ===")
+    print(f"Model: {model_path}")
+    print(f"Input file: {input_file}")
+    print(f"Sample index: {sample_index}")
     
     # Print configuration
     log.info("Configuration:")
