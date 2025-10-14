@@ -6,13 +6,14 @@ XrDataset class for GLONET using xarray for NetCDF data handling
 import os
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
+import pytorch_lightning as pl
 import xarray as xr
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Union
-import logging
 
-log = logging.getLogger(__name__)
+# import logging
+# log = logging.getLogger(__name__)
 
 
 class XrDataset(Dataset):
@@ -84,8 +85,8 @@ class XrDataset(Dataset):
         if self.normalize or self.standardize :
             self._calculate_statistics()
         
-        log.info(f"Initialized XrDataset with {len(self)} samples for split '{split}'")
-        log.info(f"Data shape: {self.data.shape}")
+        self.log(f"Initialized XrDataset with {len(self)} samples for split '{split}'")
+        self.log(f"Data shape: {self.data.shape}")
     
     def _load_data(self) -> xr.Dataset :
         """Load data from NetCDF files"""
@@ -128,9 +129,9 @@ class XrDataset(Dataset):
         # Sort by time
         data = data.sortby(self.time_dim)
         
-        log.info(f"Loaded data with variables: {list(data.data_vars)}")
-        log.info(f"Time range: {data[self.time_dim].min().values} to {data[self.time_dim].max().values}")
-        log.info(f"Spatial dimensions: {data[self.spatial_dims[0]].size} x {data[self.spatial_dims[1]].size}")
+        self.log.info(f"Loaded data with variables: {list(data.data_vars)}")
+        self.log.info(f"Time range: {data[self.time_dim].min().values} to {data[self.time_dim].max().values}")
+        self.log.info(f"Spatial dimensions: {data[self.spatial_dims[0]].size} x {data[self.spatial_dims[1]].size}")
         
         return data
     
@@ -162,7 +163,7 @@ class XrDataset(Dataset):
         # Convert to torch tensor
         data = torch.from_numpy(data).float() #.double()
         
-        log.info(f"Preprocessed data shape: {data.shape}")
+        self.log.info(f"Preprocessed data shape: {data.shape}")
         return data
     
 
@@ -179,7 +180,7 @@ class XrDataset(Dataset):
 
         # Valid start indices
         self.valid_indices = list(range(T - min_length + 1))
-        log.info(f"Checked {len(self.valid_indices)} valid sequence starting indices")
+        self.log.info(f"Checked {len(self.valid_indices)} valid sequence starting indices")
     
         
     def _split_indices(self) -> None :
@@ -223,8 +224,8 @@ class XrDataset(Dataset):
             self.data_max = self.data.max()
             
             
-            log.info(f"Calculated statistics - Mean: {self.mean.mean():.4f}, Std: {self.std.mean():.4f}")
-            log.info(f"Data range: [{self.data_min:.4f}, {self.data_max:.4f}]")
+            self.log.info(f"Calculated statistics - Mean: {self.mean.mean():.4f}, Std: {self.std.mean():.4f}")
+            self.log.info(f"Data range: [{self.data_min:.4f}, {self.data_max:.4f}]")
 
             # Save statistics in tensor with pytorch
             
@@ -236,7 +237,7 @@ class XrDataset(Dataset):
             }
 
             torch.save(statistics, self.stat_path)
-            log.info(f"Train statistics data is save in {self.stat_path}")
+            self.log.info(f"Train statistics data is save in {self.stat_path}")
 
         else :
             # Load saved statistics data from training data
@@ -298,46 +299,62 @@ class XrDataset(Dataset):
         }
 
 
-def create_xr_datasets(cfg) -> Tuple[XrDataset, XrDataset, XrDataset]:
-    """
-    Create train, validation, and test datasets from configuration
-    
-    Args:
-        cfg: Hydra configuration object
+class GlonetDataModule(pl.LightningDataModule):
+    """DataModule for GLONET using XrDataset"""
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
         
-    Returns:
-        Tuple of (train_dataset, val_dataset, test_dataset)
-    """
-    # Extract configuration parameters
-    data_cfg = cfg.data
-    model_cfg = cfg.model
+        # Extract configuration parameters
+        self.data_cfg = cfg.data
+        self.model_cfg = cfg.model
 
-    # Dataset parameters
-    dataset_params = {
-        'data_paths' : data_cfg.get('input_paths', 'data/input.nc'),
-        'variables' : data_cfg.get('variables', None),
-        'spatial_dims' : data_cfg.get('dimensions', {}).get('spatial', ['lat', 'lon']),
-        'time_dim' : data_cfg.get('dimensions', {}).get('time', 'time'),
-        'sequence_length' : data_cfg.get('sequence_length', model_cfg.dim[0] if hasattr(model_cfg, 'dim') else 2),
-        'forecast_horizon' : data_cfg.get('forecast_horizon', 10),
-        'crop_zone' : data_cfg.get('preprocessing', {}).get('crop_zone', None),
-        'normalize' : data_cfg.get('preprocessing', {}).get('normalize', True),
-        'standardize' : data_cfg.get('preprocessing', {}).get('standardize', True),
-        'split_ratios' : (
-            data_cfg.get('train_split', 0.8),  
-            data_cfg.get('val_split', 0.1),  
-            data_cfg.get('test_split', 0.1) 
-        ), 
-        'stat_path': data_cfg.get('statistics', {}).get('save_path', 'data/statistics.pth'),
-        'random_seed': cfg.get('seed', 42) 
-    } 
-     
-    # Create datasets for each split 
-    train_dataset = XrDataset(split='train', **dataset_params)
-    val_dataset = XrDataset(split='val', **dataset_params)
-    test_dataset = XrDataset(split='test', **dataset_params)
+        # Dataset parameters
+        self.dataset_params = {
+            'data_paths' : self.data_cfg.get('data_paths', 'data/input.nc'),
+            'variables' : self.data_cfg.get('variables', None),
+            'spatial_dims' : self.data_cfg.get('dimensions', {}).get('spatial', ['lat', 'lon']),
+            'time_dim' : self.data_cfg.get('dimensions', {}).get('time', 'time'),
+            'sequence_length' : self.data_cfg.get('sequence_length', self.model_cfg.dim[0] 
+                                                  if hasattr(self.model_cfg, 'dim') else 2),
+            'forecast_horizon' : self.data_cfg.get('forecast_horizon', 10),
+            'crop_zone' : self.data_cfg.get('preprocessing', {}).get('crop_zone', None),
+            'normalize' : self.data_cfg.get('preprocessing', {}).get('normalize', True),
+            'standardize' : self.data_cfg.get('preprocessing', {}).get('standardize', True),
+            'split_ratios' : (
+                self.data_cfg.get('train_split', 0.8),  
+                self.data_cfg.get('val_split', 0.1),  
+                self.data_cfg.get('test_split', 0.1) 
+            ), 
+            'stat_path': self.data_cfg.get('statistics', {}).get('stat_path', 'data/statistics.pth'),
+            'random_seed': self.cfg.get('seed', 42) 
+        } 
     
-    log.info(f"Created datasets - Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}")
-    
-    return train_dataset, val_dataset, test_dataset
+    def setup(self, stage: Optional[str] = None):
+        """Optional setup hook called by PyTorch Lightning.
+
+        Accepts an optional `stage` argument (e.g. 'fit', 'test') to match
+        Lightning's expected signature and avoid TypeError when called by the
+        Trainer. This implementation is a no-op since datasets are created in
+        the dataloader methods; adjust here if you want to create and cache
+        datasets per stage.
+        """
+        # no-op by default; keep for Lightning compatibility
+        return None
+        
+    def train_dataloader(self):
+        train_dataset = XrDataset(split='train', **self.dataset_params)
+        return DataLoader(train_dataset, 
+                          batch_size=self.cfg.training.batch_size, shuffle=True, num_workers=self.cfg.training.num_workers)
+        
+    def val_dataloader(self):
+        val_dataset = XrDataset(split='val', **self.dataset_params)
+        return DataLoader(val_dataset, 
+                          batch_size=self.cfg.training.batch_size, shuffle=False, num_workers=self.cfg.training.num_workers)
+
+    def test_dataloader(self):
+        test_dataset = XrDataset(split='test', **self.dataset_params)
+        return DataLoader(test_dataset, 
+                          batch_size=self.cfg.training.batch_size, shuffle=False, num_workers=self.cfg.training.num_workers)
+
 

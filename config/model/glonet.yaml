@@ -1,8 +1,22 @@
+# Main GLONET Configuration
+# ----------------------------- Configuration features
+# config/                       
+# ├── config.yaml               
+# ├── model/                    
+# │   ├── glonet.yaml           ✔
+# │   └── glonet_small.yaml     
+# ├── data/                     
+# │   └── GLORYS12_0125.yaml    
+# └── training/                 
+#     ├── default.yaml          
+#     └── fast.yaml              
+# -----------------------------
+
 # GLONET Model Configuration
 _target_: src.glonetLit.Glonet
 
 # Model dimensions
-dim: [2, 5, 128, 128]  # [T, C, H, W] - Time, Channels, Height, Width
+dim: [2, 5, 672, 1440]  # [T, C, H, W] - Time, Channels, Height, Width
 
 # Architecture parameters
 dT: 64              # Temporal dimension

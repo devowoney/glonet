@@ -7,8 +7,8 @@ import torch.optim as optimizer
 import pytorch_lightning as pl
 from omegaconf import DictConfig
 import hydra
-from .blocks import *
-from .NN import *
+from blocks import *
+from NN import *
 
 class Glonet(pl.LightningModule):
     def __init__(self, cfg: DictConfig):
@@ -18,17 +18,18 @@ class Glonet(pl.LightningModule):
         self.cfg = cfg
         
         # Model parameters from config
-        model_cfg = cfg.model
-        dim = model_cfg.dim
-        T, C, H, W = dim
-        self.Hn = int(H / 2 ** (model_cfg.NT / 2))
-        self.Wn = int(W / 2 ** (model_cfg.NT / 2))
+        self.model_cfg = cfg.model
+        self.dim = self.model_cfg.dim
+        T, C, H, W = self.dim
+        self.Hn = int(H / 2 ** (self.model_cfg.NT / 2))
+        self.Wn = int(W / 2 ** (self.model_cfg.NT / 2))
         
         # Initialize sub-modules
-        self.space = mspace(T*model_cfg.dT, model_cfg.dS, model_cfg.NS, self.Hn, self.Wn, model_cfg.ker, model_cfg.groups)
-        self.dynamics = tmp(dim=dim, n_heads=4, patch_size=[16,16])
-        self.maps = Encoder(C, model_cfg.dT, model_cfg.NT)
-        self.mapsback = Decoder(model_cfg.dT, C, model_cfg.NT)
+        self.space = mspace(T*self.model_cfg.dT, self.model_cfg.dS, self.model_cfg.NS, 
+                            self.Hn, self.Wn, self.model_cfg.ker, self.model_cfg.groups)
+        self.dynamics = tmp(dim=self.dim, n_heads=4, patch_size=[16,16])
+        self.maps = Encoder(C, self.model_cfg.dT, self.model_cfg.NT)
+        self.mapsback = Decoder(self.model_cfg.dT, C, self.model_cfg.NT)
         
         # Training parameters from config
         self.learning_rate = cfg.training.learning_rate
@@ -51,7 +52,7 @@ class Glonet(pl.LightningModule):
     
     def step(self, batch) :
         x, y = batch  # Assuming batch contains (input, target) pairs
-        y_hat = self(x)
+        y_hat = self.forward(x)
         loss = self.loss_fn(y_hat, y)
         return loss
     

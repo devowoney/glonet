@@ -23,8 +23,8 @@ config/
 ├── data/                 # Dataset configuration
 │   └── GLORYS12_0125.yaml # 1/4 interpolated data
 └── training/              # Training configurations
-   ├── default.yaml      # Default training settings
-   └── fast.yaml         # Fast training for testing
+    ├── default.yaml      # Default training settings
+    └── fast.yaml         # Fast training for testing
 ```
 
 ## Basic Usage

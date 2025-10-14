@@ -1,3 +1,17 @@
+# Main GLONET Configuration
+# ----------------------------- Configuration features
+# config/                       
+# ├── config.yaml               
+# ├── model/                    
+# │   ├── glonet.yaml           
+# │   └── glonet_small.yaml     ✔
+# ├── data/                     
+# │   └── GLORYS12_0125.yaml    
+# └── training/                 
+#     ├── default.yaml          
+#     └── fast.yaml              
+# -----------------------------
+
 # Lightweight GLONET Configuration for testing
 _target_: src.glonetLit.Glonet
 
