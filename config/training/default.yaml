@@ -21,8 +21,8 @@ callbacks:
 
 tensorboard:  
   save_dir: ${hydra:run.dir}
-  name: input_${state_number}_${data.forecast_horizon}d_window
-  version: lr1e-4wd1e-2
+  name: ${run_name}_${data.forecast_horizon}d_window
+  version: 1
 
 trainer:
   epochs: 1000

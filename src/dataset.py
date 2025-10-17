@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
 import xarray as xr
+import dask.array as da
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Union
 
@@ -37,7 +38,11 @@ class XrDataset(Dataset):
                  split: str = 'train',
                  split_ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
                  stat_path: str = "data/statistics.pth",
-                 random_seed: int = 42
+                 random_seed: int = 42,
+                 time_minibatch_size: int = 15,  # Minibatch size for time dimension (matches time chunk)
+                 patch_size: Tuple[int, int] = (96, 96),  # Spatial patch size (matches spatial chunks)
+                 enable_patching: bool = True,  # Whether to use spatial patching
+                 enable_time_minibatching: bool = True  # Whether to use time minibatching
     ):
         """
         Initialize XrDataset
@@ -58,6 +63,10 @@ class XrDataset(Dataset):
             split: Dataset split ('train', 'val', 'test')
             split_ratios: Ratios for train/val/test split
             random_seed: Random seed for reproducible splits
+            time_minibatch_size: Minibatch size for time dimension processing (matches time chunk size)
+            patch_size: Spatial patch size (lat, lon) for spatial batching (matches spatial chunk size)
+            enable_patching: Whether to enable spatial patching
+            enable_time_minibatching: Whether to enable time minibatching
         """
         self.data_paths = data_paths
         self.variables = variables
@@ -72,10 +81,18 @@ class XrDataset(Dataset):
         self.split_ratios = split_ratios
         self.stat_path = stat_path
         self.random_seed = random_seed
+        self.time_minibatch_size = time_minibatch_size
+        self.patch_size = patch_size
+        self.enable_patching = enable_patching
+        self.enable_time_minibatching = enable_time_minibatching
         
         # Load and process data
         self.data = self._load_data()
         self.data = self._preprocess_data()
+        
+        # Generate patch and minibatch indices
+        self._generate_patch_indices()
+        self._generate_time_minibatch_indices()
         
         # Create valid indices for forecasting
         self._make_valid_indices()
@@ -86,25 +103,41 @@ class XrDataset(Dataset):
             self._calculate_statistics()
         
         log(f"Initialized XrDataset with {len(self)} samples for split '{split}'")
-        log(f"Data shape: {self.data.shape}")
+        log(f"Data shape: {dict(self.data.dims) if hasattr(self.data, 'dims') else 'N/A'}")
     
     def _load_data(self) -> xr.Dataset :
-        """Load data from NetCDF files"""
+        """Load data from NetCDF files with dask chunking"""
+        
+        # Define chunk sizes
+        chunks = {'time': self.time_minibatch_size, 'lat': self.patch_size[0], 'lon': self.patch_size[1]}
         
         if isinstance(self.data_paths, str) :
-            # Single file
-            data = xr.open_dataset(self.data_paths)
+            # Single file - use open_dataset with chunks
+            data = xr.open_dataset(self.data_paths, chunks=chunks)
             
         elif isinstance(self.data_paths, list) :
-            # Multiple files - concatenate along time dimension
-            datasets = [xr.open_dataset(path) for path in self.data_paths]
-            data = xr.concat(datasets, dim=self.time_dim)
+            # Multiple files - use open_mfdataset with dask chunking
+            data = xr.open_mfdataset(self.data_paths, 
+                                   combine='by_coords',
+                                   concat_dim=self.time_dim,
+                                   chunks=chunks,
+                                   parallel=True)
             
         elif isinstance(self.data_paths, dict) :
             # Dictionary mapping variables to files
             data_arrays = {}
             for var_name, path in self.data_paths.items():
-                ds = xr.open_dataset(path)
+                if isinstance(path, list):
+                    # Multiple files for this variable
+                    ds = xr.open_mfdataset(path, 
+                                         combine='by_coords',
+                                         concat_dim=self.time_dim,
+                                         chunks=chunks,
+                                         parallel=True)
+                else:
+                    # Single file for this variable
+                    ds = xr.open_dataset(path, chunks=chunks)
+                    
                 if self.variables is None or var_name in self.variables:
                     data_arrays[var_name] = ds[var_name] if var_name in ds else ds[list(ds.data_vars)[0]]
             data = xr.Dataset(data_arrays)
@@ -132,45 +165,100 @@ class XrDataset(Dataset):
         log.info(f"Loaded data with variables: {list(data.data_vars)}")
         log.info(f"Time range: {data[self.time_dim].min().values} to {data[self.time_dim].max().values}")
         log.info(f"Spatial dimensions: {data[self.spatial_dims[0]].size} x {data[self.spatial_dims[1]].size}")
+        log.info(f"Data chunks: {data.chunks}")
         
         return data
     
     
-    def _preprocess_data(self) -> torch.Tensor :
-        """Preprocess the loaded data"""
+    def _preprocess_data(self) -> xr.Dataset :
+        """Preprocess the loaded data while maintaining dask chunking"""
         
-        # Convert to numpy array
-        # Stack variables along channel dimension
-        data_arrays = []
-        for var in self.data.data_vars :
-            arr = self.data[var].values
-            # Ensure we have the right dimensions [T, C, H, W]
-            if len(arr.shape) == 4 :
-                data_arrays.append(arr)
-            else :
-                raise ValueError(f"Expected 4D array for variable {var}, got shape {arr.shape}")
-
-        # Stack along channel dimension: [T, C, H, W]
-        data = np.stack(data_arrays, axis=1)
-        
-        # Spatial cropping if specified
+        # Spatial cropping if specified - apply to xarray dataset to maintain chunking
         if self.crop_zone is not None :
             start_h, start_w, end_h, end_w = self.crop_zone
             
-            # Center crop
-            data = data[:, :, start_h:end_h, start_w:end_w]
+            # Get spatial dimension names
+            lat_dim, lon_dim = self.spatial_dims
+            
+            # Apply spatial cropping using xarray indexing to maintain dask arrays
+            self.data = self.data.isel({
+                lat_dim: slice(start_h, end_h),
+                lon_dim: slice(start_w, end_w)
+            })
+            
+            log.info(f"Applied spatial cropping: {lat_dim}[{start_h}:{end_h}], {lon_dim}[{start_w}:{end_w}]")
 
-        # Convert to torch tensor
-        data = torch.from_numpy(data).float() #.double()
+        # Rechunk after cropping to ensure chunk alignment with patch size
+        chunks = {'time': self.time_minibatch_size, 'lat': self.patch_size[0], 'lon': self.patch_size[1]}
+        self.data = self.data.chunk(chunks)
         
-        log.info(f"Preprocessed data shape: {data.shape}")
-        return data
+        log.info(f"Preprocessed data shape: {dict(self.data.dims)}")
+        log.info(f"Data chunks after preprocessing: {self.data.chunks}")
+        
+        return self.data
+    
+    def _generate_patch_indices(self) -> None:
+        """Generate spatial patch indices based on patch_size that align with chunk size"""
+        
+        if not self.enable_patching:
+            self.patch_indices = [(0, 0)]  # Single patch covering full area
+            self.num_patches = 1
+            log.info("Spatial patching disabled - using full spatial extent")
+            return
+            
+        lat_dim, lon_dim = self.spatial_dims
+        lat_size = self.data.dims[lat_dim]
+        lon_size = self.data.dims[lon_dim]
+        
+        patch_lat, patch_lon = self.patch_size
+        
+        # Calculate number of patches in each dimension
+        num_lat_patches = lat_size // patch_lat
+        num_lon_patches = lon_size // patch_lon
+        
+        # Generate patch start indices
+        self.patch_indices = []
+        for i in range(num_lat_patches):
+            for j in range(num_lon_patches):
+                lat_start = i * patch_lat
+                lon_start = j * patch_lon
+                self.patch_indices.append((lat_start, lon_start))
+        
+        self.num_patches = len(self.patch_indices)
+        
+        log.info(f"Generated {self.num_patches} spatial patches of size {self.patch_size}")
+        log.info(f"Spatial coverage: {num_lat_patches}x{num_lon_patches} patches")
+        log.info(f"Total spatial size: {lat_size}x{lon_size}, Patch size: {patch_lat}x{patch_lon}")
+
+    def _generate_time_minibatch_indices(self) -> None:
+        """Generate time minibatch indices based on time_minibatch_size that align with chunk size"""
+        
+        if not self.enable_time_minibatching:
+            self.time_minibatch_indices = [0]  # Single minibatch covering full time
+            self.num_time_minibatches = 1
+            log.info("Time minibatching disabled - using full time extent")
+            return
+            
+        time_size = self.data.dims[self.time_dim]
+        
+        # Calculate number of time minibatches
+        self.num_time_minibatches = time_size // self.time_minibatch_size
+        
+        # Generate time minibatch start indices
+        self.time_minibatch_indices = []
+        for i in range(self.num_time_minibatches):
+            time_start = i * self.time_minibatch_size
+            self.time_minibatch_indices.append(time_start)
+        
+        log.info(f"Generated {self.num_time_minibatches} time minibatches of size {self.time_minibatch_size}")
+        log.info(f"Total time size: {time_size}, Time minibatch size: {self.time_minibatch_size}")
+
     
 
     def _make_valid_indices(self) :
-        """Create valid indices in taking into account `sequence_length` and `forecast_horizon`."""
+        """Create valid indices combining time, patches, and time minibatches for forecasting"""
         
-        T = self.data.shape[0]
+        T = self.data.dims[self.time_dim]
 
         # We need at least sequence_length + forecast_horizon timesteps
         min_length = self.sequence_length + self.forecast_horizon
@@ -178,21 +266,37 @@ class XrDataset(Dataset):
         if T < min_length:
             raise ValueError(f"Dataset too small: {T} timesteps, need at least {min_length}")
 
-        # Valid start indices
-        self.valid_indices = list(range(T - min_length + 1))
-        log.info(f"Checked {len(self.valid_indices)} valid sequence starting indices")
+        # Generate valid time indices within each time minibatch
+        self.valid_indices = []
+        
+        for minibatch_idx, time_minibatch_start in enumerate(self.time_minibatch_indices):
+            # Check if this time minibatch has enough timesteps
+            time_minibatch_end = min(time_minibatch_start + self.time_minibatch_size, T)
+            minibatch_length = time_minibatch_end - time_minibatch_start
+            
+            if minibatch_length >= min_length:
+                # Valid start indices within this time minibatch
+                for time_start in range(time_minibatch_start, time_minibatch_end - min_length + 1):
+                    for patch_idx, (lat_start, lon_start) in enumerate(self.patch_indices):
+                        # Create combined index: (minibatch_idx, time_start, patch_idx, lat_start, lon_start)
+                        self.valid_indices.append((minibatch_idx, time_start, patch_idx, lat_start, lon_start))
+        
+        log.info(f"Generated {len(self.valid_indices)} valid samples:")
+        log.info(f"  - Time minibatches: {self.num_time_minibatches}")
+        log.info(f"  - Spatial patches: {self.num_patches}")
+        log.info(f"  - Valid time steps per minibatch: varies")
     
         
     def _split_indices(self) -> None :
         """Shuffle and split indices for train/val/test sets instead of directly shuffling the dataset."""
         
         T = len(self.valid_indices)
-        train_size = int(T * self.split_ratio[0])
-        val_size = int(T * self.split_ratio[1])
+        train_size = int(T * self.split_ratios[0])
+        val_size = int(T * self.split_ratios[1])
         test_size = T - train_size - val_size
 
         # Set random seed for reproducible splits
-        np.random.seed(self.ran_seed)
+        np.random.seed(self.random_seed)
         indices = np.random.permutation(T)
 
         if self.split == 'train' :
@@ -212,75 +316,138 @@ class XrDataset(Dataset):
         """Calculate mean and std for normalization/standardization"""
         
         if self.split == 'train' :
-            # Calculate statistics only on training data
-            self.mean = self.data.mean(dim=(0, 2, 3), keepdim=True)
-            self.std = self.data.std(dim=(0, 2, 3), keepdim=True)
+            # Calculate statistics only on training data across spatial dimensions
+            # Stack all variables to get a unified dataset for statistics
+            data_vars = list(self.data.data_vars)
             
-            # Avoid division by zero
-            self.std = torch.clamp(self.std, min=1e-8)
+            # Compute statistics for each variable
+            means = {}
+            stds = {}
+            mins = {}
+            maxs = {}
             
-            # For min-max normalization
-            self.data_min = self.data.min()
-            self.data_max = self.data.max()
+            for var in data_vars:
+                var_data = self.data[var]
+                # Compute statistics across spatial dimensions but keep time and variable separate
+                means[var] = var_data.mean(dim=self.spatial_dims).compute()
+                stds[var] = var_data.std(dim=self.spatial_dims).compute()
+                mins[var] = var_data.min().compute()
+                maxs[var] = var_data.max().compute()
             
+            self.means = means
+            self.stds = stds
+            self.data_mins = mins
+            self.data_maxs = maxs
             
-            log.info(f"Calculated statistics - Mean: {self.mean.mean():.4f}, Std: {self.std.mean():.4f}")
-            log.info(f"Data range: [{self.data_min:.4f}, {self.data_max:.4f}]")
+            # Ensure no zero std values
+            for var in data_vars:
+                self.stds[var] = xr.where(self.stds[var] < 1e-8, 1e-8, self.stds[var])
+            
+            log.info(f"Calculated statistics for variables: {data_vars}")
+            for var in data_vars:
+                log.info(f"{var} - Mean: {self.means[var].mean().values:.4f}, Std: {self.stds[var].mean().values:.4f}")
+                log.info(f"{var} - Range: [{self.data_mins[var].values:.4f}, {self.data_maxs[var].values:.4f}]")
 
-            # Save statistics in tensor with pytorch
-            
+            # Save statistics
             statistics = {
-                'data_mean' : torch.tensor([self.mean]),
-                'data_std' : torch.tensor([self.std]),
-                'data_min' : torch.tensor(self.data_min.item()),
-                'data_max' : torch.tensor(self.data_max.item())
+                'means': {var: self.means[var].values for var in data_vars},
+                'stds': {var: self.stds[var].values for var in data_vars},
+                'mins': {var: self.data_mins[var].values for var in data_vars},
+                'maxs': {var: self.data_maxs[var].values for var in data_vars},
+                'variables': data_vars
             }
 
             torch.save(statistics, self.stat_path)
-            log.info(f"Train statistics data is save in {self.stat_path}")
+            log.info(f"Train statistics data saved to {self.stat_path}")
 
         else :
             # Load saved statistics data from training data
             statistics = torch.load(self.stat_path)
-
-            self.mean = statistics.get('data_mean')
-            self.std = statistics.get('data_std')
-            self.std = torch.clamp(self.std, min=1e-8)
-            self.data_min = statistics.get('data_min')
-            self.data_max = statistics.get('data_max')
+            
+            data_vars = statistics['variables']
+            self.means = {var: xr.DataArray(statistics['means'][var]) for var in data_vars}
+            self.stds = {var: xr.DataArray(statistics['stds'][var]) for var in data_vars} 
+            self.data_mins = {var: statistics['mins'][var] for var in data_vars}
+            self.data_maxs = {var: statistics['maxs'][var] for var in data_vars}
+            
+            log.info(f"Loaded statistics for variables: {data_vars}")
 
 
     def __len__(self) -> int :
         """Return number of available sequences"""
         
-        return len(self.valid_indices)
+        return len(self.split_indices)
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor] :
         """
         Get a set of input sequences and its corresponding target
 
         Returns:
-            input_sequence: [T, C, H, W] - input sequence
-            target: [C, H, W] - target for forecasting
+            input_sequence: [T, C, H, W] - input sequence (patch)
+            target: [C, H, W] - target for forecasting (patch)
         """
 
-        start_idx = self.valid_indices[idx] - 1
-
-        # Extract input sequence
-        input_sequence = self.data[start_idx:start_idx + self.sequence_length]
+        # Map split index to actual valid index
+        actual_idx = self.split_indices[idx]
+        minibatch_idx, time_start, patch_idx, lat_start, lon_start = self.valid_indices[actual_idx]
+        
+        # Extract spatial patch coordinates
+        lat_dim, lon_dim = self.spatial_dims
+        patch_lat, patch_lon = self.patch_size
+        
+        lat_end = lat_start + patch_lat
+        lon_end = lon_start + patch_lon
+        
+        # Extract input sequence using isel for efficient dask array slicing
+        input_sequence = self.data.isel({
+            self.time_dim: slice(time_start, time_start + self.sequence_length),
+            lat_dim: slice(lat_start, lat_end),
+            lon_dim: slice(lon_start, lon_end)
+        })
         
         # Extract target (forecast_horizon timesteps ahead)
-        target_idx = start_idx + self.sequence_length + self.forecast_horizon - 1
-        target = self.data[target_idx]
+        target_time_idx = time_start + self.sequence_length + self.forecast_horizon - 1
+        target = self.data.isel({
+            self.time_dim: target_time_idx,
+            lat_dim: slice(lat_start, lat_end),
+            lon_dim: slice(lon_start, lon_end)
+        })
         
-        # Apply normalization/standardization
-        if self.normalize:
-            input_sequence = (input_sequence - self.data_min) / (self.data_max - self.data_min)
-            target = (target - self.data_min) / (self.data_max - self.data_min)
+        # Convert to torch tensors and stack variables along channel dimension
+        # Input sequence: [T, C, H, W]
+        input_arrays = []
+        target_arrays = []
         
-        if self.standardize:
-            input_sequence = (input_sequence - self.mean) / self.std
-            target = (target - self.mean.squeeze(0)) / self.std.squeeze(0)
+        for var in self.data.data_vars:
+            # Get input sequence for this variable and compute to load into memory
+            var_input = input_sequence[var].compute().values
+            var_target = target[var].compute().values
+            
+            # Apply normalization/standardization per variable
+            if self.normalize:
+                var_input = (var_input - self.data_mins[var]) / (self.data_maxs[var] - self.data_mins[var])
+                var_target = (var_target - self.data_mins[var]) / (self.data_maxs[var] - self.data_mins[var])
+            
+            if self.standardize:
+                # Broadcasting the mean/std properly across time and spatial dimensions
+                mean_vals = self.means[var].values
+                std_vals = self.stds[var].values
+                
+                var_input = (var_input - mean_vals) / std_vals
+                var_target = (var_target - mean_vals) / std_vals
+            
+            input_arrays.append(var_input)
+            target_arrays.append(var_target)
+        
+        # Stack variables along channel dimension
+        # input_sequence: [T, C, H, W]  
+        input_sequence = np.stack(input_arrays, axis=1) 
+        # target: [C, H, W]
+        target = np.stack(target_arrays, axis=0)
+        
+        # Convert to torch tensors
+        input_sequence = torch.from_numpy(input_sequence).float()
+        target = torch.from_numpy(target).float()
         
         return input_sequence, target
     
@@ -291,11 +458,19 @@ class XrDataset(Dataset):
             'num_samples': len(self),
             'sequence_length': self.sequence_length,
             'forecast_horizon': self.forecast_horizon,
-            'data_shape': tuple(self.data.shape),
-            'num_channels': self.data.shape[1],
+            'data_shape': dict(self.data.dims),
+            'num_channels': len(self.data.data_vars),
+            'variables': list(self.data.data_vars),
+            'chunks': dict(self.data.chunks) if hasattr(self.data, 'chunks') else None,
             'normalized': self.normalize,
             'standardized': self.standardize,
-            'split': self.split
+            'split': self.split,
+            'time_minibatch_size': self.time_minibatch_size,
+            'patch_size': self.patch_size,
+            'num_patches': self.num_patches if hasattr(self, 'num_patches') else 0,
+            'num_time_minibatches': self.num_time_minibatches if hasattr(self, 'num_time_minibatches') else 0,
+            'enable_patching': self.enable_patching,
+            'enable_time_minibatching': self.enable_time_minibatching
         }
 
 
@@ -327,7 +502,11 @@ class GlonetDataModule(pl.LightningDataModule):
                 self.data_cfg.get('test_split', 0.1) 
             ), 
             'stat_path': self.data_cfg.get('statistics', {}).get('stat_path', 'data/statistics.pth'),
-            'random_seed': self.cfg.get('seed', 42) 
+            'random_seed': self.cfg.get('seed', 42),
+            'time_minibatch_size': self.data_cfg.get('time_minibatch_size', 15),
+            'patch_size': tuple(self.data_cfg.get('patch_size', [96, 96])),
+            'enable_patching': self.data_cfg.get('enable_patching', True),
+            'enable_time_minibatching': self.data_cfg.get('enable_time_minibatching', True)
         } 
     
     def setup(self, stage: Optional[str] = None):
