@@ -16,7 +16,7 @@
 _target_: src.glonetLit.Glonet
 
 # Model dimensions
-dim: [2, 5, 672, 1440]  # [T, C, H, W] - Time, Channels, Height, Width
+dim: [2, 85, 672, 1440]  # [T, C, H, W] - Time, Channels, Height, Width
 
 # Architecture parameters
 dT: 64              # Temporal dimension
@@ -39,19 +39,19 @@ space:
 
 dynamics:
   _target_: src.blocks.tmp
-  dim: [2, 5, 128, 128]
+  dim: [2, 85, 672, 1440]
   ni: 3
   n_heads: 8
   patch_size: [8, 8]
 
 maps:
   _target_: src.NN.Encoder
-  C_in: 5
+  C_in: 85
   C_hid: 64
   N_S: 8
 
 mapsback:
   _target_: src.NN.Decoder
   C_hid: 64
-  C_out: 5
+  C_out: 85
   N_S: 8

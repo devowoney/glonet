@@ -12,8 +12,8 @@ import xarray as xr
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Union
 
-# import logging
-# log = logging.getLogger(__name__)
+import logging
+log = logging.getLogger(__name__)
 
 
 class XrDataset(Dataset):
@@ -85,8 +85,8 @@ class XrDataset(Dataset):
         if self.normalize or self.standardize :
             self._calculate_statistics()
         
-        self.log(f"Initialized XrDataset with {len(self)} samples for split '{split}'")
-        self.log(f"Data shape: {self.data.shape}")
+        log(f"Initialized XrDataset with {len(self)} samples for split '{split}'")
+        log(f"Data shape: {self.data.shape}")
     
     def _load_data(self) -> xr.Dataset :
         """Load data from NetCDF files"""
@@ -129,9 +129,9 @@ class XrDataset(Dataset):
         # Sort by time
         data = data.sortby(self.time_dim)
         
-        self.log.info(f"Loaded data with variables: {list(data.data_vars)}")
-        self.log.info(f"Time range: {data[self.time_dim].min().values} to {data[self.time_dim].max().values}")
-        self.log.info(f"Spatial dimensions: {data[self.spatial_dims[0]].size} x {data[self.spatial_dims[1]].size}")
+        log.info(f"Loaded data with variables: {list(data.data_vars)}")
+        log.info(f"Time range: {data[self.time_dim].min().values} to {data[self.time_dim].max().values}")
+        log.info(f"Spatial dimensions: {data[self.spatial_dims[0]].size} x {data[self.spatial_dims[1]].size}")
         
         return data
     
@@ -163,7 +163,7 @@ class XrDataset(Dataset):
         # Convert to torch tensor
         data = torch.from_numpy(data).float() #.double()
         
-        self.log.info(f"Preprocessed data shape: {data.shape}")
+        log.info(f"Preprocessed data shape: {data.shape}")
         return data
     
 
@@ -180,7 +180,7 @@ class XrDataset(Dataset):
 
         # Valid start indices
         self.valid_indices = list(range(T - min_length + 1))
-        self.log.info(f"Checked {len(self.valid_indices)} valid sequence starting indices")
+        log.info(f"Checked {len(self.valid_indices)} valid sequence starting indices")
     
         
     def _split_indices(self) -> None :
@@ -224,8 +224,8 @@ class XrDataset(Dataset):
             self.data_max = self.data.max()
             
             
-            self.log.info(f"Calculated statistics - Mean: {self.mean.mean():.4f}, Std: {self.std.mean():.4f}")
-            self.log.info(f"Data range: [{self.data_min:.4f}, {self.data_max:.4f}]")
+            log.info(f"Calculated statistics - Mean: {self.mean.mean():.4f}, Std: {self.std.mean():.4f}")
+            log.info(f"Data range: [{self.data_min:.4f}, {self.data_max:.4f}]")
 
             # Save statistics in tensor with pytorch
             
@@ -237,7 +237,7 @@ class XrDataset(Dataset):
             }
 
             torch.save(statistics, self.stat_path)
-            self.log.info(f"Train statistics data is save in {self.stat_path}")
+            log.info(f"Train statistics data is save in {self.stat_path}")
 
         else :
             # Load saved statistics data from training data
