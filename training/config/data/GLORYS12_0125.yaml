@@ -1,0 +1,44 @@
+# Main GLONET Configuration
+# ----------------------------- Configuration features
+# config/                       
+# ├── config.yaml               
+# ├── model/                    
+# │   ├── glonet.yaml           
+# │   └── glonet_small.yaml     
+# ├── data/                     
+# │   └── GLORYS12_0125.yaml    ✔
+# └── training/                 
+#     ├── default.yaml          
+#     └── fast.yaml              
+# -----------------------------
+
+data_paths: "/Odyssey/public/glonet/glorys12_1993-01-01_to_1993-12-31_init_states/combined_input.nc"
+variables: ["data"]
+
+dimensions:
+  spatial: ["lat", "lon"]
+  time: "time"
+
+computing:
+  time_minibatch_size: 15
+  patch_size: [96, 96]
+  enable_time_minibatching: true
+  enable_patching: true
+
+sequence_length: 2
+forecast_horizon: 10
+
+preprocessing:
+  crop_zone: null
+  normalize: false
+  standardize: true
+
+train_split: 0.8
+val_split: 0.1
+test_split: 0.1
+
+statistics:
+  stat_path: ${hydra:run.dir}/statistics.stat
+
+dataloader:
+  num_workers: 4
