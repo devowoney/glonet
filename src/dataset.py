@@ -25,24 +25,31 @@ class XrDataset(Dataset):
     and provides sequences for temporal forecasting.
     """
     
+    # Class-level cache for shared data and preprocessing results
+    _data_cache = {}
+    _preprocessing_cache = {}
+    
     def __init__(self, 
                  data_paths: Union[str, List[str], Dict[str, str]],
                  variables: Optional[List[str]] = None,
                  spatial_dims: Tuple[str, str] = ('lat', 'lon'),
                  time_dim: str = 'time',
+                 time_minibatch_size: int = 15,
+                 patch_size: Tuple[int, int] = (96, 96),
+                 enable_time_minibatching: bool = True,  
+                 enable_patching: bool = True, 
                  sequence_length: int = 2,
                  forecast_horizon: int = 7,
                  crop_zone: Optional[Tuple[int, int, int, int]] = None,
-                 normalize: bool = True,
-                 standardize: bool = False,
+                 normalize: bool = False,
+                 standardize: bool = True,
                  split: str = 'train',
                  split_ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
                  stat_path: str = "data/statistics.pth",
                  random_seed: int = 42,
-                 time_minibatch_size: int = 15,  # Minibatch size for time dimension (matches time chunk)
-                 patch_size: Tuple[int, int] = (96, 96),  # Spatial patch size (matches spatial chunks)
-                 enable_patching: bool = True,  # Whether to use spatial patching
-                 enable_time_minibatching: bool = True  # Whether to use time minibatching
+                 shared_data: Optional[xr.Dataset] = None
+
+
     ):
         """
         Initialize XrDataset
@@ -55,6 +62,10 @@ class XrDataset(Dataset):
             variables: List of variable names to use. If None, uses all variables
             spatial_dims: Names of spatial dimensions (height, width)
             time_dim: Name of time dimension
+            time_minibatch_size: Minibatch size for time dimension processing (matches time chunk size)
+            patch_size: Spatial patch size (lat, lon) for spatial batching (matches spatial chunk size)
+            enable_time_minibatching: Whether to enable time minibatching
+            enable_patching: Whether to enable spatial patching
             sequence_length: Number of timesteps in input sequence
             forecast_horizon: Number of timesteps to forecast
             crop_zone: Spatial crop size (H1, W1, H2, W2). If None, uses full spatial extent
@@ -63,15 +74,17 @@ class XrDataset(Dataset):
             split: Dataset split ('train', 'val', 'test')
             split_ratios: Ratios for train/val/test split
             random_seed: Random seed for reproducible splits
-            time_minibatch_size: Minibatch size for time dimension processing (matches time chunk size)
-            patch_size: Spatial patch size (lat, lon) for spatial batching (matches spatial chunk size)
-            enable_patching: Whether to enable spatial patching
-            enable_time_minibatching: Whether to enable time minibatching
+            shared_data: Pre-loaded and preprocessed data to share across dataset instances
+
         """
         self.data_paths = data_paths
         self.variables = variables
         self.spatial_dims = spatial_dims
         self.time_dim = time_dim
+        self.time_minibatch_size = time_minibatch_size
+        self.patch_size = patch_size
+        self.enable_time_minibatching = enable_time_minibatching
+        self.enable_patching = enable_patching
         self.sequence_length = sequence_length
         self.forecast_horizon = forecast_horizon
         self.crop_zone = crop_zone
@@ -81,14 +94,18 @@ class XrDataset(Dataset):
         self.split_ratios = split_ratios
         self.stat_path = stat_path
         self.random_seed = random_seed
-        self.time_minibatch_size = time_minibatch_size
-        self.patch_size = patch_size
-        self.enable_patching = enable_patching
-        self.enable_time_minibatching = enable_time_minibatching
+
+        # Create a cache key for this configuration
+        self.cache_key = self._create_cache_key()
         
-        # Load and process data
-        self.data = self._load_data()
-        self.data = self._preprocess_data()
+        # Load and process data (using cache if available)
+        if shared_data is not None:
+            log.info("Using shared preprocessed data")
+            log.info(f"    ====")
+            self.data = shared_data
+        else:
+            self.data = self._get_or_load_data()
+            self.data = self._get_or_preprocess_data()
         
         # Generate patch and minibatch indices
         self._generate_patch_indices()
@@ -102,8 +119,51 @@ class XrDataset(Dataset):
         if self.normalize or self.standardize :
             self._calculate_statistics()
         
-        log(f"Initialized XrDataset with {len(self)} samples for split '{split}'")
-        log(f"Data shape: {dict(self.data.dims) if hasattr(self.data, 'dims') else 'N/A'}")
+        log.info(f"Initialized XrDataset with {len(self)} samples for split '{self.split}'")
+        log.info(f"Data shape: {dict(self.data.sizes) if hasattr(self.data, 'dims') else 'N/A'}")
+        log.info(f"    ====    ====    ==== Dataset instance {self.split} created")
+        
+    def _create_cache_key(self) -> str:
+        """Create a unique cache key based on data loading configuration"""
+        import hashlib
+        
+        # Include all parameters that affect data loading and preprocessing
+        key_data = {
+            'data_paths': str(self.data_paths),
+            'variables': str(self.variables),
+            'crop_zone': str(self.crop_zone),
+            'time_minibatch_size': self.time_minibatch_size,
+            'patch_size': self.patch_size,
+        }
+        
+        key_str = str(sorted(key_data.items()))
+        return hashlib.md5(key_str.encode()).hexdigest()
+    
+    def _get_or_load_data(self) -> xr.Dataset:
+        """Get data from cache or load it if not cached"""
+        if self.cache_key not in self._data_cache:
+            log.info("Loading data (not in cache)")
+            self._data_cache[self.cache_key] = self._load_data()
+        else:
+            log.info("Using cached data")
+        return self._data_cache[self.cache_key]
+    
+    def _get_or_preprocess_data(self) -> xr.Dataset:
+        """Get preprocessed data from cache or preprocess it if not cached"""
+        preprocess_key = f"{self.cache_key}_preprocessed"
+        if preprocess_key not in self._preprocessing_cache:
+            log.info("Preprocessing data (not in cache)")
+            self._preprocessing_cache[preprocess_key] = self._preprocess_data()
+        else:
+            log.info("Using cached preprocessed data")
+        return self._preprocessing_cache[preprocess_key]
+    
+    @classmethod
+    def clear_cache(cls):
+        """Clear the data cache to free memory"""
+        cls._data_cache.clear()
+        cls._preprocessing_cache.clear()
+        log.info("Cleared XrDataset cache")
     
     def _load_data(self) -> xr.Dataset :
         """Load data from NetCDF files with dask chunking"""
@@ -166,6 +226,7 @@ class XrDataset(Dataset):
         log.info(f"Time range: {data[self.time_dim].min().values} to {data[self.time_dim].max().values}")
         log.info(f"Spatial dimensions: {data[self.spatial_dims[0]].size} x {data[self.spatial_dims[1]].size}")
         log.info(f"Data chunks: {data.chunks}")
+        log.info(f"    ====")
         
         return data
     
@@ -186,15 +247,16 @@ class XrDataset(Dataset):
                 lon_dim: slice(start_w, end_w)
             })
             
-            log.info(f"Applied spatial cropping: {lat_dim}[{start_h}:{end_h}], {lon_dim}[{start_w}:{end_w}]")
+            log.info(f"-->>Applied spatial cropping: {lat_dim}[{start_h}:{end_h}], {lon_dim}[{start_w}:{end_w}]")
 
         # Rechunk after cropping to ensure chunk alignment with patch size
         chunks = {'time': self.time_minibatch_size, 'lat': self.patch_size[0], 'lon': self.patch_size[1]}
         self.data = self.data.chunk(chunks)
         
-        log.info(f"Preprocessed data shape: {dict(self.data.dims)}")
+        log.info(f"Preprocessed data shape: {dict(self.data.sizes)}")
         log.info(f"Data chunks after preprocessing: {self.data.chunks}")
-        
+        log.info(f"    ====")        
+
         return self.data
     
     def _generate_patch_indices(self) -> None:
@@ -203,12 +265,12 @@ class XrDataset(Dataset):
         if not self.enable_patching:
             self.patch_indices = [(0, 0)]  # Single patch covering full area
             self.num_patches = 1
-            log.info("Spatial patching disabled - using full spatial extent")
+            log.info("[!!]Spatial patching disabled - using full spatial extent")
             return
             
         lat_dim, lon_dim = self.spatial_dims
-        lat_size = self.data.dims[lat_dim]
-        lon_size = self.data.dims[lon_dim]
+        lat_size = self.data.sizes[lat_dim]
+        lon_size = self.data.sizes[lon_dim]
         
         patch_lat, patch_lon = self.patch_size
         
@@ -229,6 +291,7 @@ class XrDataset(Dataset):
         log.info(f"Generated {self.num_patches} spatial patches of size {self.patch_size}")
         log.info(f"Spatial coverage: {num_lat_patches}x{num_lon_patches} patches")
         log.info(f"Total spatial size: {lat_size}x{lon_size}, Patch size: {patch_lat}x{patch_lon}")
+        log.info(f"    ====")
 
     def _generate_time_minibatch_indices(self) -> None:
         """Generate time minibatch indices based on time_minibatch_size that align with chunk size"""
@@ -239,7 +302,7 @@ class XrDataset(Dataset):
             log.info("Time minibatching disabled - using full time extent")
             return
             
-        time_size = self.data.dims[self.time_dim]
+        time_size = self.data.sizes[self.time_dim]
         
         # Calculate number of time minibatches
         self.num_time_minibatches = time_size // self.time_minibatch_size
@@ -252,13 +315,13 @@ class XrDataset(Dataset):
         
         log.info(f"Generated {self.num_time_minibatches} time minibatches of size {self.time_minibatch_size}")
         log.info(f"Total time size: {time_size}, Time minibatch size: {self.time_minibatch_size}")
-
+        log.info(f"    ====")
     
 
     def _make_valid_indices(self) :
         """Create valid indices combining time, patches, and time minibatches for forecasting"""
         
-        T = self.data.dims[self.time_dim]
+        T = self.data.sizes[self.time_dim]
 
         # We need at least sequence_length + forecast_horizon timesteps
         min_length = self.sequence_length + self.forecast_horizon
@@ -282,9 +345,10 @@ class XrDataset(Dataset):
                         self.valid_indices.append((minibatch_idx, time_start, patch_idx, lat_start, lon_start))
         
         log.info(f"Generated {len(self.valid_indices)} valid samples:")
-        log.info(f"  - Time minibatches: {self.num_time_minibatches}")
-        log.info(f"  - Spatial patches: {self.num_patches}")
-        log.info(f"  - Valid time steps per minibatch: varies")
+        log.info(f"Time minibatches: {self.num_time_minibatches}")
+        log.info(f"Spatial patches: {self.num_patches}")
+        log.info(f"Valid time steps per minibatch: varies")
+        log.info(f"    ====")
     
         
     def _split_indices(self) -> None :
@@ -310,67 +374,70 @@ class XrDataset(Dataset):
 
         # Sort indices to maintain temporal order within split
         self.split_indices = np.sort(self.split_indices)
-        
+
+        log.info(f"Split indices for {self.split} set:")
+        log.info(f"    {self.split_indices} -- {len(self.split_indices)} samples")
 
     def _calculate_statistics(self) -> None :
         """Calculate mean and std for normalization/standardization"""
         
         if self.split == 'train' :
             # Calculate statistics only on training data across spatial dimensions
-            # Stack all variables to get a unified dataset for statistics
-            data_vars = list(self.data.data_vars)
+            # Dataset has (time, ch, lat, lon) dimensions with one variable 'data'
             
-            # Compute statistics for each variable
-            means = {}
-            stds = {}
-            mins = {}
-            maxs = {}
+            # Dimension to make statistics (across time and spatial dimensions, keeping channel dimension)
+            dim_stat = [self.time_dim, self.spatial_dims[0], self.spatial_dims[1]]
             
-            for var in data_vars:
-                var_data = self.data[var]
-                # Compute statistics across spatial dimensions but keep time and variable separate
-                means[var] = var_data.mean(dim=self.spatial_dims).compute()
-                stds[var] = var_data.std(dim=self.spatial_dims).compute()
-                mins[var] = var_data.min().compute()
-                maxs[var] = var_data.max().compute()
-            
+            # Compute statistics for each channel
+            means = self.data.mean(dim=dim_stat, skipna=True).compute()
+            stds = self.data.std(dim=dim_stat, skipna=True).compute()
+            mins = self.data.min(dim=dim_stat, skipna=True).compute()
+            maxs = self.data.max(dim=dim_stat, skipna=True).compute()
+
             self.means = means
             self.stds = stds
             self.data_mins = mins
             self.data_maxs = maxs
             
-            # Ensure no zero std values
-            for var in data_vars:
-                self.stds[var] = xr.where(self.stds[var] < 1e-8, 1e-8, self.stds[var])
+            # Ensure no zero std values and handle NaN in std
+            # Iterate over the Dataset variables (should be just 'data')
+            for var_name in self.data.data_vars:
+                std_vals = self.stds[var_name]
+                std_vals = xr.where(std_vals < 1e-8, 1e-8, std_vals)
+                self.stds[var_name] = std_vals
             
-            log.info(f"Calculated statistics for variables: {data_vars}")
-            for var in data_vars:
-                log.info(f"{var} - Mean: {self.means[var].mean().values:.4f}, Std: {self.stds[var].mean().values:.4f}")
-                log.info(f"{var} - Range: [{self.data_mins[var].values:.4f}, {self.data_maxs[var].values:.4f}]")
+            log.info(f"Calculated statistics for channels:")
+            for var_name in self.data.data_vars:
+                log.info(f"{var_name} - Mean: {self.means[var_name].values}, Std: {self.stds[var_name].values}")
+                log.info(f"{var_name} - Range: [{self.data_mins[var_name].values}, {self.data_maxs[var_name].values}]")
 
             # Save statistics
             statistics = {
-                'means': {var: self.means[var].values for var in data_vars},
-                'stds': {var: self.stds[var].values for var in data_vars},
-                'mins': {var: self.data_mins[var].values for var in data_vars},
-                'maxs': {var: self.data_maxs[var].values for var in data_vars},
-                'variables': data_vars
+                'means': {var_name: self.means[var_name].values for var_name in self.data.data_vars},
+                'stds': {var_name: self.stds[var_name].values for var_name in self.data.data_vars},
+                'mins': {var_name: self.data_mins[var_name].values for var_name in self.data.data_vars},
+                'maxs': {var_name: self.data_maxs[var_name].values for var_name in self.data.data_vars}
             }
 
+            # Ensure directory exists
+            os.makedirs(os.path.dirname(self.stat_path), exist_ok=True)
             torch.save(statistics, self.stat_path)
             log.info(f"Train statistics data saved to {self.stat_path}")
 
         else :
             # Load saved statistics data from training data
+            if not os.path.exists(self.stat_path):
+                raise FileNotFoundError(f"Statistics file not found: {self.stat_path}. "
+                                      "Training dataset must be created first to generate statistics.")
+            
             statistics = torch.load(self.stat_path)
             
-            data_vars = statistics['variables']
-            self.means = {var: xr.DataArray(statistics['means'][var]) for var in data_vars}
-            self.stds = {var: xr.DataArray(statistics['stds'][var]) for var in data_vars} 
-            self.data_mins = {var: statistics['mins'][var] for var in data_vars}
-            self.data_maxs = {var: statistics['maxs'][var] for var in data_vars}
-            
-            log.info(f"Loaded statistics for variables: {data_vars}")
+            self.means = {var_name: statistics['means'][var_name] for var_name in statistics['means']}
+            self.stds = {var_name: statistics['stds'][var_name] for var_name in statistics['stds']}
+            self.data_mins = {var_name: statistics['mins'][var_name] for var_name in statistics['mins']}
+            self.data_maxs = {var_name: statistics['maxs'][var_name] for var_name in statistics['maxs']}
+
+            log.info(f"Loaded statistics for variables: {list(statistics['means'].keys())}")
 
 
     def __len__(self) -> int :
@@ -456,21 +523,21 @@ class XrDataset(Dataset):
         """Get information about the dataset"""
         return {
             'num_samples': len(self),
+            'time_minibatch_size': self.time_minibatch_size,
+            'patch_size': self.patch_size,
+            'num_patches': self.num_patches if hasattr(self, 'num_patches') else 0,
+            'num_time_minibatches': self.num_time_minibatches if hasattr(self, 'num_time_minibatches') else 0,
+            'enable_patching': self.enable_patching,
+            'enable_time_minibatching': self.enable_time_minibatching,
             'sequence_length': self.sequence_length,
             'forecast_horizon': self.forecast_horizon,
-            'data_shape': dict(self.data.dims),
+            'data_shape': dict(self.data.sizes),
             'num_channels': len(self.data.data_vars),
             'variables': list(self.data.data_vars),
             'chunks': dict(self.data.chunks) if hasattr(self.data, 'chunks') else None,
             'normalized': self.normalize,
             'standardized': self.standardize,
             'split': self.split,
-            'time_minibatch_size': self.time_minibatch_size,
-            'patch_size': self.patch_size,
-            'num_patches': self.num_patches if hasattr(self, 'num_patches') else 0,
-            'num_time_minibatches': self.num_time_minibatches if hasattr(self, 'num_time_minibatches') else 0,
-            'enable_patching': self.enable_patching,
-            'enable_time_minibatching': self.enable_time_minibatching
         }
 
 
@@ -490,6 +557,10 @@ class GlonetDataModule(pl.LightningDataModule):
             'variables' : self.data_cfg.get('variables', None),
             'spatial_dims' : self.data_cfg.get('dimensions', {}).get('spatial', ['lat', 'lon']),
             'time_dim' : self.data_cfg.get('dimensions', {}).get('time', 'time'),
+            'time_minibatch_size': self.data_cfg.get('computing', {}).get('time_minibatch_size', 15),
+            'patch_size': tuple(self.data_cfg.get('computing', {}).get('patch_size', [96, 96])),
+            'enable_time_minibatching': self.data_cfg.get('computing', {}).get('enable_time_minibatching', True),
+            'enable_patching': self.data_cfg.get('computing', {}).get('enable_patching', True),
             'sequence_length' : self.data_cfg.get('sequence_length', self.model_cfg.dim[0] 
                                                   if hasattr(self.model_cfg, 'dim') else 2),
             'forecast_horizon' : self.data_cfg.get('forecast_horizon', 10),
@@ -503,37 +574,48 @@ class GlonetDataModule(pl.LightningDataModule):
             ), 
             'stat_path': self.data_cfg.get('statistics', {}).get('stat_path', 'data/statistics.pth'),
             'random_seed': self.cfg.get('seed', 42),
-            'time_minibatch_size': self.data_cfg.get('time_minibatch_size', 15),
-            'patch_size': tuple(self.data_cfg.get('patch_size', [96, 96])),
-            'enable_patching': self.data_cfg.get('enable_patching', True),
-            'enable_time_minibatching': self.data_cfg.get('enable_time_minibatching', True)
         } 
     
     def setup(self, stage: Optional[str] = None):
-        """Optional setup hook called by PyTorch Lightning.
-
-        Accepts an optional `stage` argument (e.g. 'fit', 'test') to match
-        Lightning's expected signature and avoid TypeError when called by the
-        Trainer. This implementation is a no-op since datasets are created in
-        the dataloader methods; adjust here if you want to create and cache
-        datasets per stage.
+        """Setup datasets for each stage.
+        1. Avoid val_dataloader issue with pytorch lightning sanity check,
+            create train dataset first to load data, before trainer.fit algorithm.
+        2. Load data once and share it across all dataset instances to reduce redundancy.
         """
-        # no-op by default; keep for Lightning compatibility
-        return None
+        if stage == 'fit' or stage is None:
+            # Create training dataset first to load and preprocess data
+            self.train_dataset = XrDataset(split='train', **self.dataset_params)
+            
+            # Create validation dataset sharing the same preprocessed data
+            self.val_dataset = XrDataset(split='val', shared_data=self.train_dataset.data, **self.dataset_params)
+            
+        if stage == 'test' or stage is None:
+            # Ensure training dataset exists first for data loading
+            if not hasattr(self, 'train_dataset'):
+                self.train_dataset = XrDataset(split='train', **self.dataset_params)
+            
+            # Create test dataset sharing the same preprocessed data  
+            self.test_dataset = XrDataset(split='test', shared_data=self.train_dataset.data, **self.dataset_params)
         
     def train_dataloader(self):
-        train_dataset = XrDataset(split='train', **self.dataset_params)
-        return DataLoader(train_dataset, 
-                          batch_size=self.cfg.training.batch_size, shuffle=True, num_workers=self.cfg.training.num_workers)
+        return DataLoader(self.train_dataset, 
+                          shuffle=True, 
+                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4))
         
     def val_dataloader(self):
-        val_dataset = XrDataset(split='val', **self.dataset_params)
-        return DataLoader(val_dataset, 
-                          batch_size=self.cfg.training.batch_size, shuffle=False, num_workers=self.cfg.training.num_workers)
+        return DataLoader(self.val_dataset, 
+                          shuffle=False, 
+                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4))
 
     def test_dataloader(self):
-        test_dataset = XrDataset(split='test', **self.dataset_params)
-        return DataLoader(test_dataset, 
-                          batch_size=self.cfg.training.batch_size, shuffle=False, num_workers=self.cfg.training.num_workers)
+        return DataLoader(self.test_dataset, 
+                          shuffle=False, 
+                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4))
+    
+    def teardown(self, stage: Optional[str] = None):
+        """Clean up resources after training/testing"""
+        # Clear the cache to free memory
+        XrDataset.clear_cache()
+        log.info("DataModule teardown completed")
 
 

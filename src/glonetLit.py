@@ -31,10 +31,6 @@ class Glonet(pl.LightningModule):
         self.maps = Encoder(C, self.model_cfg.dT, self.model_cfg.NT)
         self.mapsback = Decoder(self.model_cfg.dT, C, self.model_cfg.NT)
         
-        # Training parameters from config
-        self.learning_rate = cfg.training.learning_rate
-        self.weight_decay = cfg.training.weight_decay
-        
         # Loss function
         self.loss_fn = hydra.utils.instantiate(cfg.training.loss)
         

@@ -32,13 +32,6 @@ trainer:
   grad_clip_norm: 1.0
   precision: 32
 
-
-# Training Configuration
-epochs: 100
-batch_size: 4
-learning_rate: 0.001
-weight_decay: 1e-5
-
 # Optimizer settings
 optimizer:
   _target_: torch.optim.Adam
