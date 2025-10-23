@@ -165,9 +165,12 @@ def create_init_states_data(start_date : str,
     for i in ["1", "2", "3"] :
         dataset = create_depth_data(start_date, end_date, function_map[i], int(i) - 1)
         datasets.append(dataset)
+        del dataset
     
     # Concatenate along 'ch' dimension
     combined_dataset = concat(datasets, dim="ch")
+    del datasets
+    gc.collect()
     
     # Reassign the `ch` dimension to ensure it is unique and sequential
     combined_dataset = combined_dataset.assign_coords(
