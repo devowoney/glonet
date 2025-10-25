@@ -9,6 +9,6 @@ output/
 sb_*.sh
 outputs/
 data/
-src/__pycache__/
 __pycache__/
 *.nc
+training/src/__pycache__/
