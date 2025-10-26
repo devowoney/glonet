@@ -216,7 +216,7 @@ class XrDataset(Dataset):
             selected_vars = [var for var in self.variables if var in available_vars]
             
             if not selected_vars : # len(selected_vars) == 0 :
-                raise ValueError(f"None of the specified variables {self.variables} found in data. Available: {available_vars}")
+                raise ValueError(f"None of the specified variables '{self.variables}' found in data. Available: {available_vars}")
             data = data[selected_vars]
         
         # Sort by time
@@ -389,10 +389,10 @@ class XrDataset(Dataset):
             dim_stat = [self.time_dim, self.spatial_dims[0], self.spatial_dims[1]]
             
             # Compute statistics for each channel
-            means = self.data.mean(dim=dim_stat, skipna=True).compute()
-            stds = self.data.std(dim=dim_stat, skipna=True).compute()
-            mins = self.data.min(dim=dim_stat, skipna=True).compute()
-            maxs = self.data.max(dim=dim_stat, skipna=True).compute()
+            means = self.data.mean(dim=dim_stat, skipna=True).persist()
+            stds = self.data.std(dim=dim_stat, skipna=True).persist()
+            mins = self.data.min(dim=dim_stat, skipna=True).persist()
+            maxs = self.data.max(dim=dim_stat, skipna=True).persist()
 
             self.means = means
             self.stds = stds
@@ -430,7 +430,7 @@ class XrDataset(Dataset):
                 raise FileNotFoundError(f"Statistics file not found: {self.stat_path}. "
                                       "Training dataset must be created first to generate statistics.")
             
-            statistics = torch.load(self.stat_path)
+            statistics = torch.load(self.stat_path, weights_only=False)
             
             self.means = {var_name: statistics['means'][var_name] for var_name in statistics['means']}
             self.stds = {var_name: statistics['stds'][var_name] for var_name in statistics['stds']}
@@ -487,8 +487,8 @@ class XrDataset(Dataset):
         
         for var in self.data.data_vars:
             # Get input sequence for this variable and compute to load into memory
-            var_input = input_sequence[var].compute().values
-            var_target = target[var].compute().values
+            var_input = input_sequence[var].persist().values
+            var_target = target[var].persist().values
             
             # Apply normalization/standardization per variable
             if self.normalize:

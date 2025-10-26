@@ -6,7 +6,7 @@
 # │   ├── glonet.yaml           
 # │   └── glonet_small.yaml     
 # ├── data/                     
-# │   └── GLORYS12_0125.yaml    
+# │   └── GLORYS12_full.yaml    
 # └── training/                 
 #     ├── default.yaml          
 #     └── fast.yaml             
@@ -14,7 +14,7 @@
 
 defaults:
   - model: glonet
-  - data: GLORYS12_0125
+  - data: GLORYS12_full
   - training: default
   - _self_
 

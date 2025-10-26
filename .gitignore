@@ -8,7 +8,7 @@ tmp.ipynb
 output/
 sb_*.sh
 outputs/
-data/
 __pycache__/
 *.nc
 training/src/__pycache__/
+training/data/
