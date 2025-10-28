@@ -16,6 +16,8 @@ from typing import List, Dict, Optional, Tuple, Union
 import logging
 log = logging.getLogger(__name__)
 
+import time
+
 
 class XrDataset(Dataset):
     """
@@ -98,6 +100,9 @@ class XrDataset(Dataset):
         # Create a cache key for this configuration
         self.cache_key = self._create_cache_key()
         
+        log.info(f"    >>>>")
+        log.info(f"Creating XrDataset instance for split '{self.split}'")
+        
         # Load and process data (using cache if available)
         if shared_data is not None:
             log.info("Using shared preprocessed data")
@@ -117,7 +122,19 @@ class XrDataset(Dataset):
         
         # Calculate statistics for normalization
         if self.normalize or self.standardize :
-            self._calculate_statistics()
+            # For training split, try to load existing statistics first, calculate if needed
+            if self.split == 'train' and not hasattr(self, 'means'):
+                # Try to load existing statistics first
+                try:
+                    self._load_statistics()
+                    log.info("Loaded existing statistics for training dataset")
+                except FileNotFoundError:
+                    # Calculate statistics if file doesn't exist
+                    log.info("No existing statistics found, calculating new statistics...")
+                    self._calculate_statistics()
+            elif self.split != 'train':
+                # Load statistics for non-training splits
+                self._load_statistics()
         
         log.info(f"Initialized XrDataset with {len(self)} samples for split '{self.split}'")
         log.info(f"Data shape: {dict(self.data.sizes) if hasattr(self.data, 'dims') else 'N/A'}")
@@ -263,7 +280,7 @@ class XrDataset(Dataset):
         """Generate spatial patch indices based on patch_size that align with chunk size"""
         
         if not self.enable_patching:
-            self.patch_indices = [(0, 0)]  # Single patch covering full area
+            self.patch_indices  = [(0, 0)]  # Single patch covering full area
             self.num_patches = 1
             log.info("[!!]Spatial patching disabled - using full spatial extent")
             return
@@ -378,66 +395,73 @@ class XrDataset(Dataset):
         log.info(f"Split indices for {self.split} set:")
         log.info(f"    {self.split_indices} -- {len(self.split_indices)} samples")
 
+    def _load_statistics(self) -> None:
+        """Load saved statistics data from training data"""
+        if not os.path.exists(self.stat_path):
+            # If normalization/standardization is disabled, we don't need statistics
+            if not self.normalize and not self.standardize:
+                log.info("Statistics not needed (normalization and standardization disabled)")
+                return
+            raise FileNotFoundError(f"Statistics file not found: {self.stat_path}. "
+                                  "Training dataset must be created first to generate statistics.")
+        
+        statistics = torch.load(self.stat_path, weights_only=False)
+        
+        self.means = {var_name: statistics['means'][var_name] for var_name in statistics['means']}
+        self.stds = {var_name: statistics['stds'][var_name] for var_name in statistics['stds']}
+        self.data_mins = {var_name: statistics['mins'][var_name] for var_name in statistics['mins']}
+        self.data_maxs = {var_name: statistics['maxs'][var_name] for var_name in statistics['maxs']}
+
+        log.info(f"Loaded statistics for variables: {list(statistics['means'].keys())}")
+
     def _calculate_statistics(self) -> None :
         """Calculate mean and std for normalization/standardization"""
         
-        if self.split == 'train' :
-            # Calculate statistics only on training data across spatial dimensions
-            # Dataset has (time, ch, lat, lon) dimensions with one variable 'data'
-            
-            # Dimension to make statistics (across time and spatial dimensions, keeping channel dimension)
-            dim_stat = [self.time_dim, self.spatial_dims[0], self.spatial_dims[1]]
-            
-            # Compute statistics for each channel
-            means = self.data.mean(dim=dim_stat, skipna=True).persist()
-            stds = self.data.std(dim=dim_stat, skipna=True).persist()
-            mins = self.data.min(dim=dim_stat, skipna=True).persist()
-            maxs = self.data.max(dim=dim_stat, skipna=True).persist()
+        log.warning(f"Calculating statistics - this may take a long time for large datasets...")
+        log.warning(f"Statistics will be saved to: {self.stat_path}")
+        
+        # Calculate statistics only on training data across spatial dimensions
+        # Dataset has (time, ch, lat, lon) dimensions with one variable 'data'
+        
+        # Dimension to make statistics (across time and spatial dimensions, keeping channel dimension)
+        dim_stat = [self.time_dim, self.spatial_dims[0], self.spatial_dims[1]]
+        
+        # Compute statistics for each channel
+        data_persisted = self.data.persist()
+        means = data_persisted.mean(dim=dim_stat, skipna=True)
+        stds = data_persisted.std(dim=dim_stat, skipna=True)
+        mins = data_persisted.min(dim=dim_stat, skipna=True)
+        maxs = data_persisted.max(dim=dim_stat, skipna=True)
 
-            self.means = means
-            self.stds = stds
-            self.data_mins = mins
-            self.data_maxs = maxs
-            
-            # Ensure no zero std values and handle NaN in std
-            # Iterate over the Dataset variables (should be just 'data')
-            for var_name in self.data.data_vars:
-                std_vals = self.stds[var_name]
-                std_vals = xr.where(std_vals < 1e-8, 1e-8, std_vals)
-                self.stds[var_name] = std_vals
-            
-            log.info(f"Calculated statistics for channels:")
-            for var_name in self.data.data_vars:
-                log.info(f"{var_name} - Mean: {self.means[var_name].values}, Std: {self.stds[var_name].values}")
-                log.info(f"{var_name} - Range: [{self.data_mins[var_name].values}, {self.data_maxs[var_name].values}]")
+        self.means = means
+        self.stds = stds
+        self.data_mins = mins
+        self.data_maxs = maxs
+        
+        # Ensure no zero std values and handle NaN in std
+        # Iterate over the Dataset variables (should be just 'data')
+        for var_name in self.data.data_vars:
+            std_vals = self.stds[var_name]
+            std_vals = xr.where(std_vals < 1e-8, 1e-8, std_vals)
+            self.stds[var_name] = std_vals
+        
+        log.info(f"Calculated statistics for channels:")
+        for var_name in self.data.data_vars:
+            log.info(f"{var_name} - Mean: {self.means[var_name].values}, Std: {self.stds[var_name].values}")
+            log.info(f"{var_name} - Range: [{self.data_mins[var_name].values}, {self.data_maxs[var_name].values}]")
 
-            # Save statistics
-            statistics = {
-                'means': {var_name: self.means[var_name].values for var_name in self.data.data_vars},
-                'stds': {var_name: self.stds[var_name].values for var_name in self.data.data_vars},
-                'mins': {var_name: self.data_mins[var_name].values for var_name in self.data.data_vars},
-                'maxs': {var_name: self.data_maxs[var_name].values for var_name in self.data.data_vars}
-            }
+        # Save statistics
+        statistics = {
+            'means': {var_name: self.means[var_name].values for var_name in self.data.data_vars},
+            'stds': {var_name: self.stds[var_name].values for var_name in self.data.data_vars},
+            'mins': {var_name: self.data_mins[var_name].values for var_name in self.data.data_vars},
+            'maxs': {var_name: self.data_maxs[var_name].values for var_name in self.data.data_vars}
+        }
 
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(self.stat_path), exist_ok=True)
-            torch.save(statistics, self.stat_path)
-            log.info(f"Train statistics data saved to {self.stat_path}")
-
-        else :
-            # Load saved statistics data from training data
-            if not os.path.exists(self.stat_path):
-                raise FileNotFoundError(f"Statistics file not found: {self.stat_path}. "
-                                      "Training dataset must be created first to generate statistics.")
-            
-            statistics = torch.load(self.stat_path, weights_only=False)
-            
-            self.means = {var_name: statistics['means'][var_name] for var_name in statistics['means']}
-            self.stds = {var_name: statistics['stds'][var_name] for var_name in statistics['stds']}
-            self.data_mins = {var_name: statistics['mins'][var_name] for var_name in statistics['mins']}
-            self.data_maxs = {var_name: statistics['maxs'][var_name] for var_name in statistics['maxs']}
-
-            log.info(f"Loaded statistics for variables: {list(statistics['means'].keys())}")
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(self.stat_path), exist_ok=True)
+        torch.save(statistics, self.stat_path)
+        log.info(f"Train statistics data saved to {self.stat_path}")
 
 
     def __len__(self) -> int :
@@ -491,11 +515,11 @@ class XrDataset(Dataset):
             var_target = target[var].persist().values
             
             # Apply normalization/standardization per variable
-            if self.normalize:
+            if self.normalize and hasattr(self, 'data_mins') and hasattr(self, 'data_maxs'):
                 var_input = (var_input - self.data_mins[var]) / (self.data_maxs[var] - self.data_mins[var])
                 var_target = (var_target - self.data_mins[var]) / (self.data_maxs[var] - self.data_mins[var])
             
-            if self.standardize:
+            if self.standardize and hasattr(self, 'means') and hasattr(self, 'stds'):
                 # Broadcasting the mean/std properly across time and spatial dimensions
                 mean_vals = self.means[var].values
                 std_vals = self.stds[var].values
@@ -506,11 +530,11 @@ class XrDataset(Dataset):
             input_arrays.append(var_input)
             target_arrays.append(var_target)
         
-        # Stack variables along channel dimension
+        # Since data already has channel dimension [T, C, H, W], we concatenate along channel axis
         # input_sequence: [T, C, H, W]  
-        input_sequence = np.stack(input_arrays, axis=1) 
+        input_sequence = np.concatenate(input_arrays, axis=1) if len(input_arrays) > 1 else input_arrays[0]
         # target: [C, H, W]
-        target = np.stack(target_arrays, axis=0)
+        target = np.concatenate(target_arrays, axis=0) if len(target_arrays) > 1 else target_arrays[0]
         
         # Convert to torch tensors
         input_sequence = torch.from_numpy(input_sequence).float()
@@ -578,36 +602,103 @@ class GlonetDataModule(pl.LightningDataModule):
     
     def setup(self, stage: Optional[str] = None):
         """Setup datasets for each stage.
-        1. Avoid val_dataloader issue with pytorch lightning sanity check,
-            create train dataset first to load data, before trainer.fit algorithm.
-        2. Load data once and share it across all dataset instances to reduce redundancy.
+        Optimized for PyTorch Lightning sanity check:
+        1. Load and preprocess data once, share across all dataset instances
+        2. Create datasets lazily to avoid redundant work during sanity check
+        3. Handle statistics calculation efficiently
         """
-        if stage == 'fit' or stage is None:
-            # Create training dataset first to load and preprocess data
-            self.train_dataset = XrDataset(split='train', **self.dataset_params)
+        # Initialize shared data if not already done
+        if not hasattr(self, '_shared_data'):
+            log.info("Loading and preprocessing data for sharing...")
+            start_time = time.time()
             
-            # Create validation dataset sharing the same preprocessed data
-            self.val_dataset = XrDataset(split='val', shared_data=self.train_dataset.data, **self.dataset_params)
+            # Create a minimal dataset instance just to load and preprocess data
+            # Temporarily disable statistics calculation to speed up data loading
+            temp_params = self.dataset_params.copy()
+            temp_params['normalize'] = False  # Disable normalization/standardization
+            temp_params['standardize'] = False  # to avoid expensive statistics calculation
+            
+            temp_dataset = XrDataset(split='train', **temp_params)
+            self._shared_data = temp_dataset.data
+            
+            log.info(f"Shared data prepared in {time.time() - start_time:.2f} seconds.")
+        
+        if stage == 'fit' or stage is None:
+            # Create datasets with shared data - much faster since data is already loaded
+            if not hasattr(self, 'train_dataset'):
+                start_time = time.time()
+                log.info("Setting up train dataset...")
+                self.train_dataset = XrDataset(split='train', shared_data=self._shared_data, **self.dataset_params)
+                
+                # Share statistics from train dataset to other splits
+                if hasattr(self.train_dataset, 'means'):
+                    self._shared_statistics = {
+                        'means': self.train_dataset.means,
+                        'stds': self.train_dataset.stds,
+                        'data_mins': self.train_dataset.data_mins,
+                        'data_maxs': self.train_dataset.data_maxs
+                    }
+                
+                log.info(f"Train dataset created in {time.time() - start_time:.2f} seconds.")
+            
+            if not hasattr(self, 'val_dataset'):
+                start_time = time.time()
+                log.info("Setting up validation dataset...")
+                self.val_dataset = XrDataset(split='val', shared_data=self._shared_data, **self.dataset_params)
+                
+                # Copy shared statistics to validation dataset
+                if hasattr(self, '_shared_statistics'):
+                    self.val_dataset.means = self._shared_statistics['means']
+                    self.val_dataset.stds = self._shared_statistics['stds']
+                    self.val_dataset.data_mins = self._shared_statistics['data_mins']
+                    self.val_dataset.data_maxs = self._shared_statistics['data_maxs']
+                
+                log.info(f"Validation dataset created in {time.time() - start_time:.2f} seconds.")
             
         if stage == 'test' or stage is None:
-            # Ensure training dataset exists first for data loading
-            if not hasattr(self, 'train_dataset'):
-                self.train_dataset = XrDataset(split='train', **self.dataset_params)
-            
-            # Create test dataset sharing the same preprocessed data  
-            self.test_dataset = XrDataset(split='test', shared_data=self.train_dataset.data, **self.dataset_params)
+            if not hasattr(self, 'test_dataset'):
+                # Ensure shared data exists
+                if not hasattr(self, '_shared_data'):
+                    # Use minimal params to avoid expensive statistics calculation
+                    temp_params = self.dataset_params.copy()
+                    temp_params['normalize'] = False
+                    temp_params['standardize'] = False
+                    temp_dataset = XrDataset(split='train', **temp_params)
+                    self._shared_data = temp_dataset.data
+                
+                self.test_dataset = XrDataset(split='test', shared_data=self._shared_data, **self.dataset_params)
+                
+                # Copy shared statistics to test dataset
+                if hasattr(self, '_shared_statistics'):
+                    self.test_dataset.means = self._shared_statistics['means']
+                    self.test_dataset.stds = self._shared_statistics['stds']
+                    self.test_dataset.data_mins = self._shared_statistics['data_mins']
+                    self.test_dataset.data_maxs = self._shared_statistics['data_maxs']
         
     def train_dataloader(self):
+        log.info("Creating train dataloader")
+        # Ensure train dataset exists
+        if not hasattr(self, 'train_dataset'):
+            self.setup('fit')
         return DataLoader(self.train_dataset, 
                           shuffle=True, 
-                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4))
+                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4),  # Limit workers
+                          batch_size=1)  # Start with batch size 1 to avoid memory issues
         
     def val_dataloader(self):
+        log.info("Creating validation dataloader")
+        # Ensure validation dataset exists (important for sanity check)
+        if not hasattr(self, 'val_dataset'):
+            self.setup('fit')
         return DataLoader(self.val_dataset, 
                           shuffle=False, 
-                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4))
+                          num_workers=0,  # Use 0 workers for sanity check to avoid memory issues
+                          batch_size=1)   # Use batch size 1 for sanity check
 
     def test_dataloader(self):
+        # Ensure test dataset exists
+        if not hasattr(self, 'test_dataset'):
+            self.setup('test')
         return DataLoader(self.test_dataset, 
                           shuffle=False, 
                           num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4))
@@ -616,6 +707,13 @@ class GlonetDataModule(pl.LightningDataModule):
         """Clean up resources after training/testing"""
         # Clear the cache to free memory
         XrDataset.clear_cache()
+        
+        # Clear shared data to free memory
+        if hasattr(self, '_shared_data'):
+            del self._shared_data
+        if hasattr(self, '_shared_statistics'):
+            del self._shared_statistics
+            
         log.info("DataModule teardown completed")
 
 

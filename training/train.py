@@ -73,6 +73,8 @@ def main(cfg : DictConfig) -> float:
         log_every_n_steps=cfg.training.trainer.log_every_n_steps,
         # gradient_clip_val=cfg.training.trainer.grad_clip_norm,
         precision=cfg.training.trainer.precision,
+        num_sanity_val_steps=cfg.training.trainer.num_sanity_val_steps,
+        fast_dev_run=cfg.training.trainer.fast_dev_run,
         enable_checkpointing=True,
         enable_progress_bar=True,
         enable_model_summary=True,

@@ -4,18 +4,18 @@
 # ├── config.yaml               ✔
 # ├── model/                    
 # │   ├── glonet.yaml           
-# │   └── glonet_small.yaml     
+# │   └── glonet_patch.yaml     
 # ├── data/                     
-# │   └── GLORYS12_full.yaml    
+# │   └── GLORYS12.yaml    
 # └── training/                 
 #     ├── default.yaml          
 #     └── fast.yaml             
 # -----------------------------
 
 defaults:
-  - model: glonet
-  - data: GLORYS12_full
-  - training: default
+  - model: glonet_patch
+  - data: GLORYS12
+  - training: fast
   - _self_
 
 # General settings

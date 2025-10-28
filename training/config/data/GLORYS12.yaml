@@ -4,9 +4,9 @@
 # ├── config.yaml               
 # ├── model/                    
 # │   ├── glonet.yaml           
-# │   └── glonet_small.yaml     
+# │   └── glonet_patch.yaml     
 # ├── data/                     
-# │   └── GLORYS12_full.yaml    ✔
+# │   └── GLORYS12.yaml    ✔
 # └── training/                 
 #     ├── default.yaml          
 #     └── fast.yaml             
@@ -38,7 +38,7 @@ val_split: 0.1
 test_split: 0.1
 
 statistics:
-  stat_path: 'data/glorys12_statistics.stat'
+  stat_path: 'data/glorys12_1993_01-06.stat'
 
 dataloader:
   num_workers: 8

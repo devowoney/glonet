@@ -12,3 +12,4 @@ __pycache__/
 *.nc
 training/src/__pycache__/
 training/data/
+.vscode/

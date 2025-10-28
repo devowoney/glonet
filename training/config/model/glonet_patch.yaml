@@ -3,8 +3,8 @@
 # config/                       
 # ├── config.yaml               
 # ├── model/                    
-# │   ├── glonet.yaml           ✔
-# │   └── glonet_patch.yaml     
+# │   ├── glonet.yaml           
+# │   └── glonet_patch.yaml     ✔
 # ├── data/                     
 # │   └── GLORYS12.yaml    
 # └── training/                 
@@ -16,7 +16,7 @@
 _target_: src.glonetLit.Glonet
 
 # Model dimensions
-dim: [2, 85, 672, 1440]  # [T, C, H, W] - Time, Channels, Height, Width
+dim: [2, 85, 96, 96]  # [T, C, H, W] - Time, Channels, Height, Width (updated for patch size)
 
 # Architecture parameters
 dT: 64              # Temporal dimension
@@ -39,7 +39,7 @@ space:
 
 dynamics:
   _target_: src.blocks.tmp
-  dim: [2, 85, 672, 1440]
+  dim: [2, 85, 96, 96]  # Updated to match patch size
   ni: 3
   n_heads: 8
   patch_size: [8, 8]
