@@ -516,16 +516,33 @@ class XrDataset(Dataset):
             
             # Apply normalization/standardization per variable
             if self.normalize and hasattr(self, 'data_mins') and hasattr(self, 'data_maxs'):
-                var_input = (var_input - self.data_mins[var]) / (self.data_maxs[var] - self.data_mins[var])
-                var_target = (var_target - self.data_mins[var]) / (self.data_maxs[var] - self.data_mins[var])
+                # Handle both xarray and numpy array cases for loaded statistics
+                data_min = self.data_mins[var].values if hasattr(self.data_mins[var], 'values') else self.data_mins[var]
+                data_max = self.data_maxs[var].values if hasattr(self.data_maxs[var], 'values') else self.data_maxs[var]
+                
+                # Reshape for proper broadcasting
+                data_min_input = data_min.reshape(1, -1, 1, 1)   # (1, C, 1, 1) for broadcasting with (T, C, H, W)
+                data_max_input = data_max.reshape(1, -1, 1, 1)
+                data_min_target = data_min.reshape(-1, 1, 1)     # (C, 1, 1) for broadcasting with (C, H, W)
+                data_max_target = data_max.reshape(-1, 1, 1)
+                
+                var_input = (var_input - data_min_input) / (data_max_input - data_min_input)
+                var_target = (var_target - data_min_target) / (data_max_target - data_min_target)
             
             if self.standardize and hasattr(self, 'means') and hasattr(self, 'stds'):
-                # Broadcasting the mean/std properly across time and spatial dimensions
-                mean_vals = self.means[var].values
-                std_vals = self.stds[var].values
+                # Handle both xarray and numpy array cases for loaded statistics
+                mean_vals = self.means[var].values if hasattr(self.means[var], 'values') else self.means[var]
+                std_vals = self.stds[var].values if hasattr(self.stds[var], 'values') else self.stds[var]
                 
-                var_input = (var_input - mean_vals) / std_vals
-                var_target = (var_target - mean_vals) / std_vals
+                # Reshape for proper broadcasting: 
+                # mean_vals/std_vals shape: (C,) -> (1, C, 1, 1) for input, (C, 1, 1) for target
+                mean_vals_input = mean_vals.reshape(1, -1, 1, 1)  # (1, C, 1, 1) for broadcasting with (T, C, H, W)
+                std_vals_input = std_vals.reshape(1, -1, 1, 1)
+                mean_vals_target = mean_vals.reshape(-1, 1, 1)    # (C, 1, 1) for broadcasting with (C, H, W)
+                std_vals_target = std_vals.reshape(-1, 1, 1)
+                
+                var_input = (var_input - mean_vals_input) / std_vals_input
+                var_target = (var_target - mean_vals_target) / std_vals_target
             
             input_arrays.append(var_input)
             target_arrays.append(var_target)
