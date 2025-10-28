@@ -41,4 +41,6 @@ statistics:
   stat_path: 'data/glorys12_1993_01-06.stat'
 
 dataloader:
+  batch_size: 1
   num_workers: 8
+  pin_memory: true

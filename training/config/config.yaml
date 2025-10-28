@@ -15,7 +15,7 @@
 defaults:
   - model: glonet_patch
   - data: GLORYS12
-  - training: fast
+  - training: default
   - _self_
 
 # General settings

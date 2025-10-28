@@ -557,6 +557,10 @@ class XrDataset(Dataset):
         input_sequence = torch.from_numpy(input_sequence).float()
         target = torch.from_numpy(target).float()
         
+        # Handle NaN values that might arise from division
+        input_sequence = np.nan_to_num(input_sequence, nan=0.0)
+        target = np.nan_to_num(target, nan=0.0)
+        
         return input_sequence, target
     
     
@@ -699,9 +703,10 @@ class GlonetDataModule(pl.LightningDataModule):
             self.setup('fit')
         return DataLoader(self.train_dataset, 
                           shuffle=True, 
-                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4),  # Limit workers
-                          batch_size=1)  # Start with batch size 1 to avoid memory issues
-        
+                          batch_size=self.data_cfg.get('dataloader', {}).get('batch_size', 1),
+                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4),
+                          pin_memory=self.data_cfg.get('dataloader', {}).get('pin_memory', True))
+
     def val_dataloader(self):
         log.info("Creating validation dataloader")
         # Ensure validation dataset exists (important for sanity check)
@@ -709,8 +714,9 @@ class GlonetDataModule(pl.LightningDataModule):
             self.setup('fit')
         return DataLoader(self.val_dataset, 
                           shuffle=False, 
-                          num_workers=0,  # Use 0 workers for sanity check to avoid memory issues
-                          batch_size=1)   # Use batch size 1 for sanity check
+                          batch_size=self.data_cfg.get('dataloader', {}).get('batch_size', 1),
+                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4),
+                          pin_memory=self.data_cfg.get('dataloader', {}).get('pin_memory', True))
 
     def test_dataloader(self):
         # Ensure test dataset exists
@@ -718,7 +724,9 @@ class GlonetDataModule(pl.LightningDataModule):
             self.setup('test')
         return DataLoader(self.test_dataset, 
                           shuffle=False, 
-                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4))
+                          batch_size=self.data_cfg.get('dataloader', {}).get('batch_size', 1),
+                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4),
+                          pin_memory=self.data_cfg.get('dataloader', {}).get('pin_memory', True))
     
     def teardown(self, stage: Optional[str] = None):
         """Clean up resources after training/testing"""
