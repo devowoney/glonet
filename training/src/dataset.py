@@ -36,10 +36,8 @@ class XrDataset(Dataset):
                  variables: Optional[List[str]] = None,
                  spatial_dims: Tuple[str, str] = ('lat', 'lon'),
                  time_dim: str = 'time',
-                 time_minibatch_size: int = 15,
                  patch_size: Tuple[int, int] = (96, 96),
-                 enable_time_minibatching: bool = True,  
-                 enable_patching: bool = True, 
+                 enable_patching: bool = True,
                  sequence_length: int = 2,
                  forecast_horizon: int = 7,
                  crop_zone: Optional[Tuple[int, int, int, int]] = None,
@@ -49,7 +47,8 @@ class XrDataset(Dataset):
                  split_ratios: Tuple[float, float, float] = (0.8, 0.1, 0.1),
                  stat_path: str = "data/statistics.pth",
                  random_seed: int = 42,
-                 shared_data: Optional[xr.Dataset] = None
+                 shared_data: Optional[xr.Dataset] = None,
+                 batch_size: int = 8  # Added for chunking alignment
 
 
     ):
@@ -64,9 +63,7 @@ class XrDataset(Dataset):
             variables: List of variable names to use. If None, uses all variables
             spatial_dims: Names of spatial dimensions (height, width)
             time_dim: Name of time dimension
-            time_minibatch_size: Minibatch size for time dimension processing (matches time chunk size)
             patch_size: Spatial patch size (lat, lon) for spatial batching (matches spatial chunk size)
-            enable_time_minibatching: Whether to enable time minibatching
             enable_patching: Whether to enable spatial patching
             sequence_length: Number of timesteps in input sequence
             forecast_horizon: Number of timesteps to forecast
@@ -77,15 +74,14 @@ class XrDataset(Dataset):
             split_ratios: Ratios for train/val/test split
             random_seed: Random seed for reproducible splits
             shared_data: Pre-loaded and preprocessed data to share across dataset instances
+            batch_size: DataLoader batch size for time chunking alignment
 
         """
         self.data_paths = data_paths
         self.variables = variables
         self.spatial_dims = spatial_dims
         self.time_dim = time_dim
-        self.time_minibatch_size = time_minibatch_size
         self.patch_size = patch_size
-        self.enable_time_minibatching = enable_time_minibatching
         self.enable_patching = enable_patching
         self.sequence_length = sequence_length
         self.forecast_horizon = forecast_horizon
@@ -96,6 +92,7 @@ class XrDataset(Dataset):
         self.split_ratios = split_ratios
         self.stat_path = stat_path
         self.random_seed = random_seed
+        self.batch_size = batch_size  # Store for chunking
 
         # Create a cache key for this configuration
         self.cache_key = self._create_cache_key()
@@ -112,11 +109,10 @@ class XrDataset(Dataset):
             self.data = self._get_or_load_data()
             self.data = self._get_or_preprocess_data()
         
-        # Generate patch and minibatch indices
+        # Generate patch indices
         self._generate_patch_indices()
-        self._generate_time_minibatch_indices()
         
-        # Create valid indices for forecasting
+        # Create valid indices for forecasting using global approach
         self._make_valid_indices()
         self._split_indices()
         
@@ -149,7 +145,6 @@ class XrDataset(Dataset):
             'data_paths': str(self.data_paths),
             'variables': str(self.variables),
             'crop_zone': str(self.crop_zone),
-            'time_minibatch_size': self.time_minibatch_size,
             'patch_size': self.patch_size,
         }
         
@@ -186,7 +181,7 @@ class XrDataset(Dataset):
         """Load data from NetCDF files with dask chunking"""
         
         # Define chunk sizes
-        chunks = {'time': self.time_minibatch_size, 'lat': self.patch_size[0], 'lon': self.patch_size[1]}
+        chunks = {'time': self.batch_size, 'lat': self.patch_size[0], 'lon': self.patch_size[1]}
         
         if isinstance(self.data_paths, str) :
             # Single file - use open_dataset with chunks
@@ -266,8 +261,9 @@ class XrDataset(Dataset):
             
             log.info(f"-->>Applied spatial cropping: {lat_dim}[{start_h}:{end_h}], {lon_dim}[{start_w}:{end_w}]")
 
-        # Rechunk after cropping to ensure chunk alignment with patch size
-        chunks = {'time': self.time_minibatch_size, 'lat': self.patch_size[0], 'lon': self.patch_size[1]}
+        # Rechunk for efficient I/O - use batch_size for time chunking
+        # This aligns chunking with actual DataLoader batch size for better I/O performance
+        chunks = {'time': self.batch_size, 'lat': self.patch_size[0], 'lon': self.patch_size[1]}
         self.data = self.data.chunk(chunks)
         
         log.info(f"Preprocessed data shape: {dict(self.data.sizes)}")
@@ -310,33 +306,8 @@ class XrDataset(Dataset):
         log.info(f"Total spatial size: {lat_size}x{lon_size}, Patch size: {patch_lat}x{patch_lon}")
         log.info(f"    ====")
 
-    def _generate_time_minibatch_indices(self) -> None:
-        """Generate time minibatch indices based on time_minibatch_size that align with chunk size"""
-        
-        if not self.enable_time_minibatching:
-            self.time_minibatch_indices = [0]  # Single minibatch covering full time
-            self.num_time_minibatches = 1
-            log.info("Time minibatching disabled - using full time extent")
-            return
-            
-        time_size = self.data.sizes[self.time_dim]
-        
-        # Calculate number of time minibatches
-        self.num_time_minibatches = time_size // self.time_minibatch_size
-        
-        # Generate time minibatch start indices
-        self.time_minibatch_indices = []
-        for i in range(self.num_time_minibatches):
-            time_start = i * self.time_minibatch_size
-            self.time_minibatch_indices.append(time_start)
-        
-        log.info(f"Generated {self.num_time_minibatches} time minibatches of size {self.time_minibatch_size}")
-        log.info(f"Total time size: {time_size}, Time minibatch size: {self.time_minibatch_size}")
-        log.info(f"    ====")
-    
-
     def _make_valid_indices(self) :
-        """Create valid indices combining time, patches, and time minibatches for forecasting"""
+        """Create valid indices using global approach"""
         
         T = self.data.sizes[self.time_dim]
 
@@ -346,25 +317,18 @@ class XrDataset(Dataset):
         if T < min_length:
             raise ValueError(f"Dataset too small: {T} timesteps, need at least {min_length}")
 
-        # Generate valid time indices within each time minibatch
+        # Global approach: use all possible time positions
         self.valid_indices = []
         
-        for minibatch_idx, time_minibatch_start in enumerate(self.time_minibatch_indices):
-            # Check if this time minibatch has enough timesteps
-            time_minibatch_end = min(time_minibatch_start + self.time_minibatch_size, T)
-            minibatch_length = time_minibatch_end - time_minibatch_start
-            
-            if minibatch_length >= min_length:
-                # Valid start indices within this time minibatch
-                for time_start in range(time_minibatch_start, time_minibatch_end - min_length + 1):
-                    for patch_idx, (lat_start, lon_start) in enumerate(self.patch_indices):
-                        # Create combined index: (minibatch_idx, time_start, patch_idx, lat_start, lon_start)
-                        self.valid_indices.append((minibatch_idx, time_start, patch_idx, lat_start, lon_start))
+        for time_start in range(T - min_length + 1):
+            for patch_idx, (lat_start, lon_start) in enumerate(self.patch_indices):
+                # Simplified index: (time_start, patch_idx, lat_start, lon_start)
+                self.valid_indices.append((time_start, patch_idx, lat_start, lon_start))
         
-        log.info(f"Generated {len(self.valid_indices)} valid samples:")
-        log.info(f"Time minibatches: {self.num_time_minibatches}")
+        log.info(f"Generated {len(self.valid_indices)} valid samples (global indexing):")
+        log.info(f"Total valid time positions: {T - min_length + 1}")
         log.info(f"Spatial patches: {self.num_patches}")
-        log.info(f"Valid time steps per minibatch: varies")
+        log.info(f"Total samples: {(T - min_length + 1) * self.num_patches}")
         log.info(f"    ====")
     
         
@@ -480,7 +444,7 @@ class XrDataset(Dataset):
 
         # Map split index to actual valid index
         actual_idx = self.split_indices[idx]
-        minibatch_idx, time_start, patch_idx, lat_start, lon_start = self.valid_indices[actual_idx]
+        time_start, patch_idx, lat_start, lon_start = self.valid_indices[actual_idx]
         
         # Extract spatial patch coordinates
         lat_dim, lon_dim = self.spatial_dims
@@ -568,12 +532,9 @@ class XrDataset(Dataset):
         """Get information about the dataset"""
         return {
             'num_samples': len(self),
-            'time_minibatch_size': self.time_minibatch_size,
             'patch_size': self.patch_size,
             'num_patches': self.num_patches if hasattr(self, 'num_patches') else 0,
-            'num_time_minibatches': self.num_time_minibatches if hasattr(self, 'num_time_minibatches') else 0,
             'enable_patching': self.enable_patching,
-            'enable_time_minibatching': self.enable_time_minibatching,
             'sequence_length': self.sequence_length,
             'forecast_horizon': self.forecast_horizon,
             'data_shape': dict(self.data.sizes),
@@ -602,9 +563,7 @@ class GlonetDataModule(pl.LightningDataModule):
             'variables' : self.data_cfg.get('variables', None),
             'spatial_dims' : self.data_cfg.get('dimensions', {}).get('spatial', ['lat', 'lon']),
             'time_dim' : self.data_cfg.get('dimensions', {}).get('time', 'time'),
-            'time_minibatch_size': self.data_cfg.get('computing', {}).get('time_minibatch_size', 15),
             'patch_size': tuple(self.data_cfg.get('computing', {}).get('patch_size', [96, 96])),
-            'enable_time_minibatching': self.data_cfg.get('computing', {}).get('enable_time_minibatching', True),
             'enable_patching': self.data_cfg.get('computing', {}).get('enable_patching', True),
             'sequence_length' : self.data_cfg.get('sequence_length', self.model_cfg.dim[0] 
                                                   if hasattr(self.model_cfg, 'dim') else 2),
@@ -619,6 +578,7 @@ class GlonetDataModule(pl.LightningDataModule):
             ), 
             'stat_path': self.data_cfg.get('statistics', {}).get('stat_path', 'data/statistics.pth'),
             'random_seed': self.cfg.get('seed', 42),
+            'batch_size': self.data_cfg.get('dataloader', {}).get('batch_size', 8),  # For chunking alignment
         } 
     
     def setup(self, stage: Optional[str] = None):

@@ -20,9 +20,7 @@ dimensions:
   time: 'time'
 
 computing:
-  time_minibatch_size: 15
   patch_size: [96, 96]
-  enable_time_minibatching: true
   enable_patching: true
 
 sequence_length: 2
@@ -41,6 +39,6 @@ statistics:
   stat_path: 'data/glorys12_1993_01-06.stat'
 
 dataloader:
-  batch_size: 1
+  batch_size: 32
   num_workers: 8
   pin_memory: true
