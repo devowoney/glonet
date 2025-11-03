@@ -1,0 +1,487 @@
+import gc
+import sys
+import xarray as xr
+import numpy as np
+from datetime import datetime, timedelta
+import os
+import time
+from torch.amp import autocast
+
+import torch
+
+import argparse
+from pathlib import Path
+
+MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
+INPUT_LOCATION = "/Odyssey/public/glonet"
+user = os.environ.get("USER")
+DEFAULT_OUTPUT_LOCATION = f"/Odyssey/private/{user}/glonet/output"
+
+
+#####
+## Forecast
+#####
+
+def make_nc(vars, denormalizer, ti, lead):
+    vars = denormalizer(vars)
+    d = xr.open_dataset(f"{MODEL_LOCATION}/ref1.nc")
+    d = xr.concat([d] * vars.shape[1], dim="time")
+    d["zos"] = d["zos"] * vars.numpy()[0, :, 0:1].squeeze()
+    d["thetao"] = d["thetao"] * vars.numpy()[0, :, 1:2]
+    d["so"] = d["so"] * vars.numpy()[0, :, 2:3]
+    d["uo"] = d["uo"] * vars.numpy()[0, :, 3:4]
+    d["vo"] = d["vo"] * vars.numpy()[0, :, 4:5]
+    # d=d.assign(velo=np.sqrt(d['uo']*d['uo']+d['vo']*d['vo']))
+    time = np.arange(
+        str(ti + timedelta(days=2 * lead)),
+        str(ti + timedelta(days=2 * lead + 2)),
+        dtype="datetime64[D]",
+    )
+    d = d.assign_coords(time=time)
+    return xr.decode_cf(d)
+
+
+def make_nc2(vars, denormalizer, ti, lead):
+    vars = denormalizer(vars)
+    d = xr.open_dataset(f"{MODEL_LOCATION}/ref2.nc")
+    d = xr.concat([d] * vars.shape[1], dim="time")
+    d["thetao"] = d["thetao"] * vars.numpy()[0, :, 0:10]
+    d["so"] = d["so"] * vars.numpy()[0, :, 10:20]
+    d["uo"] = d["uo"] * vars.numpy()[0, :, 20:30]
+    d["vo"] = d["vo"] * vars.numpy()[0, :, 30:40]
+    # d=d.assign(velo=np.sqrt(d['uo']*d['uo']+d['vo']*d['vo']))
+    time = np.arange(
+        str(ti + timedelta(days=2 * lead)),
+        str(ti + timedelta(days=2 * lead + 2)),
+        dtype="datetime64[D]",
+    )
+    d = d.assign_coords(time=time)
+    return xr.decode_cf(d)
+
+
+def make_nc3(vars, denormalizer, ti, lead):
+    vars = denormalizer(vars)
+    d = xr.open_dataset(f"{MODEL_LOCATION}/ref3.nc")
+    d = xr.concat([d] * vars.shape[1], dim="time")
+    d["thetao"] = d["thetao"] * vars.numpy()[0, :, 0:10]
+    d["so"] = d["so"] * vars.numpy()[0, :, 10:20]
+    d["uo"] = d["uo"] * vars.numpy()[0, :, 20:30]
+    d["vo"] = d["vo"] * vars.numpy()[0, :, 30:40]
+    # d=d.assign(velo=np.sqrt(d['uo']*d['uo']+d['vo']*d['vo']))
+    time = np.arange(
+        str(ti + timedelta(days=2 * lead)),
+        str(ti + timedelta(days=2 * lead + 2)),
+        dtype="datetime64[D]",
+    )
+    d = d.assign_coords(time=time)
+    return xr.decode_cf(d)
+
+def add_metadata(ds, date):
+    ds = ds.rename({"lat": "latitude", "lon": "longitude"})
+    # Add global attributes
+    ds.attrs["Conventions"] = "CF-1.8"
+    ds.attrs["area"] = "Global"
+    ds.attrs["Conventions"] = "CF-1.8"
+    ds.attrs["contact"] = "glonet@mercator-ocean.eu"
+    ds.attrs["institution"] = "Mercator Ocean International"
+    ds.attrs["source"] = "MOI GLONET"
+    ds.attrs["title"] = (
+        "daily mean fields from GLONET 1/4 degree resolution Forecast updated Daily"
+    )
+    ds.attrs["references"] = "www.edito.eu"
+
+    del ds.attrs["regrid_method"]
+
+    # zos variable
+    ds["zos"].attrs = {
+        "cell_methods": "area: mean",
+        "long_name": "Sea surface height",
+        "standard_name": "sea_surface_height_above_geoid",
+        "unit_long": "Meters",
+        "units": "m",
+        "valid_max": 5.0,
+        "valid_min": -5.0,
+    }
+
+    # latitude variable
+    ds["latitude"].attrs = {
+        "axis": "Y",
+        "long_name": "Latitude",
+        "standard_name": "latitude",
+        "step": ds.latitude.values[1] - ds.latitude.values[0],
+        "unit_long": "Degrees North",
+        "units": "degrees_north",
+        "valid_max": ds.latitude.values.max(),
+        "valid_min": ds.latitude.values.min(),
+    }
+
+    # longitude variable
+    ds["longitude"].attrs = {
+        "axis": "X",
+        "long_name": "Longitude",
+        "standard_name": "longitude",
+        "step": ds.longitude.values[1] - ds.longitude.values[0],
+        "unit_long": "Degrees East",
+        "units": "degrees_east",
+        "valid_max": ds.longitude.values.max(),
+        "valid_min": ds.longitude.values.min(),
+    }
+
+    # time variable
+    ds["time"].attrs = {
+        "valid_min": str(date + timedelta(days=1)),
+        "valid_max": str(date + timedelta(days=10)),
+    }
+
+    # depth variable
+    ds["depth"].attrs = {
+        "axis": "Z",
+        "long_name": "Elevation",
+        "positive": "down",
+        "standard_name": "elevation",
+        "unit_long": "Meters",
+        "units": "m",
+        "valid_min": 0.494025,
+        "valid_max": 5727.917,
+    }
+
+    # uo variable
+    ds["uo"].attrs = {
+        "cell_methods": "area: mean",
+        "long_name": "Eastward velocity",
+        "standard_name": "eastward_sea_water_velocity",
+        "unit_long": "Meters per second",
+        "units": "m s-1",
+        "valid_max": 5.0,
+        "valid_min": -5.0,
+    }
+
+    # vo variable
+    ds["vo"].attrs = {
+        "cell_methods": "area: mean",
+        "long_name": "Northward velocity",
+        "standard_name": "northward_sea_water_velocity",
+        "unit_long": "Meters per second",
+        "units": "m s-1",
+        "valid_max": 5.0,
+        "valid_min": -5.0,
+    }
+
+    # so variable
+    ds["so"].attrs = {
+        "cell_methods": "area: mean",
+        "long_name": "Salinity",
+        "standard_name": "sea_water_salinity",
+        "unit_long": "Practical Salinity Unit",
+        "units": "1e-3",
+        "valid_max": 50.0,
+        "valid_min": 0.0,
+    }
+
+    # thetao variable
+    ds["thetao"].attrs = {
+        "cell_methods": "area: mean",
+        "long_name": "Temperature",
+        "standard_name": "sea_water_potential_temperature",
+        "unit_long": "Degrees Celsius",
+        "units": "degrees_C",
+        "valid_max": 40.0,
+        "valid_min": -10.0,
+    }
+    return ds
+
+def aforecast(d, date, cycle : int):
+    from utility import get_denormalizer1, get_normalizer1
+
+    denormalizer = get_denormalizer1(MODEL_LOCATION)
+    normalizer = get_normalizer1(MODEL_LOCATION)
+    nan_mask = np.isnan(d.variables["data"][1])
+    nan_mask = np.where(nan_mask, 0, 1)
+    mask = torch.tensor(nan_mask, dtype=torch.float32)
+    data = np.nan_to_num(d.data.data, copy=False)
+    vin = torch.tensor(data, dtype=torch.float32)
+    mask = mask.cpu().detach().unsqueeze(0)
+    vin = normalizer(vin)
+
+    vin = vin.cpu().detach().unsqueeze(0)
+    vin = vin.contiguous()
+    datasets = []
+    del data, nan_mask
+    gc.collect()  # Force garbage collection
+    for i in range(1, int((cycle + 1) / 2) + 1):
+        print(i)
+        model_inf = torch.jit.load(
+            MODEL_LOCATION + "/" + "glonet_p1.pt"
+        )  # or "scripted_model.pt"
+        model_inf = model_inf.to("cuda:0")
+        with torch.no_grad():
+            model_inf.eval()
+
+        with torch.no_grad():
+            with autocast(device_type="cuda:0"):
+                vin = vin * mask.cpu()
+                outvar = model_inf(vin.to("cuda:0"))
+                outvar = outvar.detach().cpu()
+
+        del vin
+        gc.collect()
+
+        d = make_nc(outvar, denormalizer, date, i)
+        datasets.append(d)
+        vin = outvar
+        vin = vin.cpu().detach()
+        del outvar, model_inf
+        gc.collect()
+    del (
+        vin,
+        mask,
+    )
+    gc.collect()
+    return datasets
+
+def aforecast2(d, date, cycle):
+    from utility import get_denormalizer2, get_normalizer2
+
+    denormalizer = get_denormalizer2(MODEL_LOCATION)
+    normalizer = get_normalizer2(MODEL_LOCATION)
+    nan_mask = np.isnan(d.variables["data"][1])
+    nan_mask = np.where(nan_mask, 0, 1)
+    mask = torch.tensor(nan_mask, dtype=torch.float32)
+    data = np.nan_to_num(d.data.data, copy=False)
+    vin = torch.tensor(data, dtype=torch.float32)
+    mask = mask.cpu().detach().unsqueeze(0)
+    vin = normalizer(vin)
+
+    vin = vin.cpu().detach().unsqueeze(0)
+    vin = vin.contiguous()
+    datasets = []
+    del data, nan_mask
+    gc.collect()  # Force garbage collection
+
+    for i in range(1, int((cycle + 1) / 2) + 1):
+        print(i)
+        model_inf = torch.jit.load(
+            MODEL_LOCATION + "/" + "glonet_p2.pt"
+        )  # or "scripted_model.pt"
+        model_inf = model_inf.to("cuda:0")
+        with torch.no_grad():
+            model_inf.eval()
+
+        with torch.no_grad():
+            with autocast(device_type="cuda:0"):
+                vin = vin * mask.cpu()
+                outvar = model_inf(vin.to("cuda:0"))
+                outvar = outvar.detach().cpu()
+
+        del vin
+        gc.collect()
+
+        d = make_nc2(outvar, denormalizer, date, i)
+        datasets.append(d)
+        vin = outvar
+        vin = vin.cpu().detach()
+        del outvar, model_inf
+        gc.collect()
+    del (
+        vin,
+        mask,
+    )
+    gc.collect()
+    return datasets
+
+
+def aforecast3(d, date, cycle):
+    from utility import get_denormalizer3, get_normalizer3
+
+    denormalizer = get_denormalizer3(MODEL_LOCATION)
+    normalizer = get_normalizer3(MODEL_LOCATION)
+    nan_mask = np.isnan(d.variables["data"][1])
+    nan_mask = np.where(nan_mask, 0, 1)
+    mask = torch.tensor(nan_mask, dtype=torch.float32)
+    data = np.nan_to_num(d.data.data, copy=False)
+    vin = torch.tensor(data, dtype=torch.float32)
+    mask = mask.cpu().detach().unsqueeze(0)
+    vin = normalizer(vin)
+
+    vin = vin.cpu().detach().unsqueeze(0)
+    vin = vin.contiguous()
+    datasets = []
+    del data, nan_mask
+    gc.collect()  # Force garbage collection
+
+    for i in range(1, int((cycle + 1) / 2) + 1):
+        print(i)
+        model_inf = torch.jit.load(
+            MODEL_LOCATION + "/" + "glonet_p3.pt"
+        )  # or "scripted_model.pt"
+        model_inf = model_inf.to("cuda:0")
+        with torch.no_grad():
+            model_inf.eval()
+
+        with torch.no_grad():
+            with autocast(device_type="cuda:0"):
+                vin = vin * mask.cpu()
+                outvar = model_inf(vin.to("cuda:0"))
+                outvar = outvar.detach().cpu()
+
+        del vin
+        gc.collect()
+
+        d = make_nc3(outvar, denormalizer, date, i)
+        datasets.append(d)
+        vin = outvar
+        vin = vin.cpu().detach()
+        del outvar, model_inf
+        gc.collect()
+    del (
+        vin,
+        mask,
+    )
+    gc.collect()
+    return datasets
+
+def create_forecast(rdata1_path : Path,
+                    rdata2_path : Path,
+                    rdata3_path : Path,
+                    forecast_cycle : int = None, 
+                    output_path : str = None) -> xr.Dataset :
+    # Extract string date from the first file path
+    # Assuming the date is in the directory name or filename
+    init_date_str = str(rdata1_path.parent).split("_init_", 1)[0].rsplit("/", 1)[1] if "_init_" in str(rdata1_path.parent) else None
+    
+    if init_date_str is None:
+        # If date is not in directory name, try to extract from filename
+        # This is a fallback - you may need to adjust based on your naming convention
+        init_date_str = datetime.now().strftime("%Y-%m-%d")
+        print(f"Warning: Could not extract date from path, using current date: {init_date_str}")
+    
+    # Detect whether the forecast is from GLORYS12 or GLONET forecast states.
+    if "_init_" in str(rdata1_path.parent) and str(rdata1_path.parent).split("_init_", 1)[1].split("_")[0] == "from" :
+        is_from_glonet_out = True
+    else :
+        is_from_glonet_out = False
+        
+    date = datetime.strptime(init_date_str, "%Y-%m-%d").date()
+
+    start_datetime = str(date - timedelta(days=1))
+    end_datetime = str(date + timedelta(days=7)) 
+    print(
+        f"Creating {init_date_str} forecast from {start_datetime} to {end_datetime}..."
+    )
+
+    start_timed = time.time()
+    rdata1 = xr.open_dataset(rdata1_path)
+    rdata2 = xr.open_dataset(rdata2_path)
+    rdata3 = xr.open_dataset(rdata3_path)
+    end_timed = time.time()
+    execution_timed = end_timed - start_timed
+    start_time = time.time()
+    if forecast_cycle :
+        forecast_cycle = forecast_cycle
+    else : 
+        forecast_cycle = 7
+    
+    ds1 = aforecast(rdata1, date - timedelta(days=1), cycle=forecast_cycle)
+    del rdata1
+    gc.collect()
+    ds2 = aforecast2(rdata2, date - timedelta(days=1), cycle=forecast_cycle)
+    del rdata2
+    gc.collect()
+    ds3 = aforecast3(rdata3, date - timedelta(days=1), cycle=forecast_cycle)
+    del rdata3
+    gc.collect()
+    end_time = time.time()
+    execution_time = end_time - start_time
+    print(f"Time to get-process data: {execution_timed:.4f} seconds")
+    print(f"Time taken by for 10 days on cpu: {execution_time:.4f} seconds")
+    combined1 = xr.concat(ds1, dim="time")
+    combined2 = xr.concat(ds2, dim="time")
+    combined3 = xr.concat(ds3, dim="time")
+    del ds1, ds2, ds3
+    gc.collect()
+
+    combined4 = xr.concat([combined1, combined2, combined3], dim="depth")
+    combined4["zos"] = combined4.zos.isel(depth=0)
+    combined4 = add_metadata(combined4, date)
+
+    # Free memory
+    del combined1, combined2, combined3
+    gc.collect()
+
+    # Write output NetCDF file
+    if output_path :
+        out_path = output_path
+    else : 
+        out_path = DEFAULT_OUTPUT_LOCATION
+         
+    # os.makedirs(out_path, exist_ok=True)
+    if not is_from_glonet_out :
+        combined4.to_netcdf(f"{out_path}")
+    else :
+        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date_str}.nc")
+        
+    print(f"Forecast by GLONET completed : output saved in < {out_path} >")
+    
+    return combined4
+
+def parse_args ():
+    parser = argparse.ArgumentParser(
+        description="GLONET forecast - forecast ocean states of each day during its forecast cycle."
+    )
+    
+    parser.add_argument(
+        "input1",
+        type=Path,
+        help="Path to the first input1 NetCDF file (e.g., en1.nc)"
+    )
+    
+    parser.add_argument(
+        "input2", 
+        type=Path,
+        help="Path to the second input2 NetCDF file (e.g., en2.nc)"
+    )
+    
+    parser.add_argument(
+        "input3",
+        type=Path, 
+        help="Path to the third input3 NetCDF file (e.g., /path/example/en3.nc)"
+    )
+    
+    parser.add_argument(
+        "-c", "--cycle",
+        dest="forecast_cycle",
+        type=int,
+        required=False,
+        help="Define forecast cycle of GLONET. Default cylce is 7 for 7-day forecast."
+    )
+    
+    parser.add_argument(
+        "-o", "--output",
+        dest="output",
+        type=str,
+        required=True,
+        help="Define output file.nc manually for the continous ensemble propagation."
+    )
+    
+    return parser.parse_args()
+
+
+
+def main() :
+
+    args = parse_args()
+    
+    rdata1_path = args.input1
+    rdata2_path = args.input2
+    rdata3_path = args.input3
+    forecast_cycle = args.forecast_cycle
+    output = args.output
+    
+    create_forecast(rdata1_path=rdata1_path,
+                    rdata2_path=rdata2_path,
+                    rdata3_path=rdata3_path,
+                    forecast_cycle=forecast_cycle, 
+                    output_path=output)
+
+if __name__ == "__main__":
+    main()
