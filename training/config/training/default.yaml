@@ -50,3 +50,8 @@ scheduler:
 # Loss function
 loss:
   _target_: torch.nn.MSELoss
+
+# Resume from checkpoint
+resume:
+  enable_checkpoint: true              # Set to true to resume from checkpoint
+  checkpoint_path: "/Odyssey/private/j25lee/glonet/training/outputs/2025-10-29/debugrun_171400/checkpoints/test.ckpt"  

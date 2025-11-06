@@ -12,7 +12,7 @@
 #     └── fast.yaml             
 # -----------------------------
 
-data_paths: '/Odyssey/public/glonet/glorys12_1993-01-01_to_1993-06-30_init_states/combined_input.nc'
+data_paths: '/Odyssey/public/glonet/glorys12_1993-07-01_to_1993-12-31_init_states/combined_input.nc'
 variables: ['data'] # bracket nessesary
 
 dimensions:
@@ -36,7 +36,7 @@ val_split: 0.1
 test_split: 0.1
 
 statistics:
-  stat_path: 'data/glorys12_1993_01-06.stat'
+  stat_path: 'data/glorys12_1993_07-12.stat'
 
 dataloader:
   batch_size: 32

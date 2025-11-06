@@ -82,7 +82,12 @@ def main(cfg : DictConfig) -> float:
     )
     
     # Train the model
-    trainer.fit(model, datamodule=data_module)
+    if cfg.training.resume.enable_checkpoint :
+        checkpoint_path = cfg.training.resume.checkpoint_path
+        log.info(f"Resuming training from checkpoint: {checkpoint_path}")
+        trainer.fit(model, datamodule=data_module, ckpt_path=checkpoint_path)
+    else:
+        trainer.fit(model, datamodule=data_module)
 
 
 if __name__ == "__main__":
