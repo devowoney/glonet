@@ -403,7 +403,10 @@ def create_forecast(rdata1_path : Path,
     combined4 = xr.concat([combined1, combined2, combined3], dim="depth")
     combined4["zos"] = combined4.zos.isel(depth=0)
     combined4 = add_metadata(combined4, date)
-
+    
+    vars_order = ['zos', 'thetao', 'so', 'uo', 'vo']
+    combined4 = combined4[vars_order]
+    
     # Free memory
     del combined1, combined2, combined3
     gc.collect()

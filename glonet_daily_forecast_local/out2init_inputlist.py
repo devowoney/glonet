@@ -16,7 +16,7 @@ from pathlib import Path
 DEFAULT_OUTPUT_LOCATION = "/Odyssey/public/glonet"
 
 def reshapeDataset(in_ds : xr.Dataset) -> xr.Dataset:
-        
+
     out_ds = (in_ds.to_array(dim = "variable")                              # Convert to xarray DatArray
                     .stack(ch=("variable", "depth"))                        # Merge two dimensions one dimension "ch"
                     .reset_index("ch", drop=True)                           # Clear void coordinates 
@@ -115,9 +115,9 @@ def parse_args () :
     parser.add_argument(
         dest = "autoregress_cycle",
         type = int,
-        help = """Autoregression cycle to extract last day forecast.
-                    It can be different with forecast cycle. 
-                    But make sure that the cycle should be smaller than the forecast cycle.
+        help = """Autoregression cycle to extract two days data for forecast.
+                    Make sure that the cycle should be smaller than the forecast cycle.
+                    And, it should be bigger than 1.
         """
     )
     
