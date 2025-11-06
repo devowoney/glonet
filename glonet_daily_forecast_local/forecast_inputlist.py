@@ -426,7 +426,8 @@ def create_forecast(rdata1_path : Path,
 
 def parse_args ():
     parser = argparse.ArgumentParser(
-        description="GLONET forecast - forecast ocean states of each day during its forecast cycle."
+        description="""GLONET forecast - same as forecast.py but takes 3 input files explicitly.
+                        Designed for manual ensemble propagation."""
     )
     
     parser.add_argument(

@@ -30,13 +30,16 @@ def reshapeDataset(in_ds : xr.Dataset) -> xr.Dataset:
 # Divide forcast NetCDF file in to 3 files by states depth.
 def makeThreeInput(input_nc : str, 
                     cycle : int,
-                    output_path : Path = None) -> list[xr.Dataset] :
+                    output_path : Path = None,
+                    filename_prefix : str = "") -> list[xr.Dataset] :
     r"""
     input_nc is the forecast path which is the issue of glonet.
     
     Here, cycle stands for the extraction of the forecast data in interest.
      
     It is NOT same as the cycle of the forecast python script. And of course, this cycle should be smaller than forecast cycle
+    
+    filename_prefix is used to distinguish output files when processing multiple input files.
     """
     
     # Extract date.
@@ -50,10 +53,14 @@ def makeThreeInput(input_nc : str,
         out_path = DEFAULT_OUTPUT_LOCATION + f"/{forecast_date}_init_from_{init_date}"
     
     path_check = Path(out_path)
-    if path_check.exists() :
+    # Only check if directory exists and is empty for the first file processing
+    # Since we want to put multiple files in the same directory
+    if not path_check.exists():
         path_check_abs = path_check.resolve()
-        print(f"File is alreday exist in < {path_check_abs} >")
-        return
+        print(f"Creating output directory:  {path_check_abs}")
+    else:
+        path_check_abs = path_check.resolve()
+        print(f"Using existing output directory: {path_check_abs}")
     
     # Read netCDF file and pick only two last timeset.
     input_nc_abs = Path(input_nc).resolve()
@@ -74,7 +81,7 @@ def makeThreeInput(input_nc : str,
     
     # Write output NetCDF file.
     out_path_abs = Path(out_path).resolve()
-    print(f"Writing input files...")
+    print(f"Writing input files for {input_nc}...")
     os.makedirs(out_path, exist_ok=True)
 
     # initialize a list
@@ -83,29 +90,34 @@ def makeThreeInput(input_nc : str,
     for i in ["1", "2", "3"] :
         converted = reshapeDataset(ds_map[i])
         in123.append(converted)
-        converted.to_netcdf(f"{out_path}/input{i}.nc")
-        print(f"input{i}.nc is done")
+        # Add filename prefix to distinguish between different input files
+        output_filename = f"{filename_prefix}_input{i}.nc" if filename_prefix else f"input{i}.nc"
+        converted.to_netcdf(f"{out_path}/{output_filename}")
+        print(f"{output_filename} is done")
     
-    print(f"Converted data is saved in < {out_path_abs} >")
+    print(f"Converted data from {Path(input_nc).name} is saved in < {out_path_abs} >")
     return in123
 
 # Parseargs setting.
 def parse_args () :
     parser = argparse.ArgumentParser(
-        description="Process forecast NetCDF from GLONET and write into input format."
+        description="""Same as out2init.py but takes list of input files explicitly.
+                        Designed for manual ensemble propagation."""
     )
     
     parser.add_argument(
-        dest = "input_file",
+        dest = "input_files",
         type = Path,
-        help = "GLONET forecast NetCDF format file."
+        nargs = "+",
+        help = "List of GLONET forecast NetCDF format files."
     )
     
     parser.add_argument(
         dest = "autoregress_cycle",
         type = int,
         help = """Autoregression cycle to extract last day forecast.
-        It can be different with forecast cycle. But make sure that the cycle should be smaller than the forecast cycle.
+                    It can be different with forecast cycle. 
+                    But make sure that the cycle should be smaller than the forecast cycle.
         """
     )
     
@@ -114,7 +126,8 @@ def parse_args () :
         dest = "output_path",
         type = Path,
         required=False,
-        help = "Path to save output file. If output is not given by terminal input, the output will be saved in default location"
+        help = """Path to save output files. If output is not given by terminal input, 
+                    the output will be saved in default location based on the first input file"""
     )
     
     return parser.parse_args()
@@ -125,13 +138,40 @@ def main() :
 
     args = parse_args()
     
-    input_file = args.input_file
+    input_files = args.input_files
     autoregress_cycle = args.autoregress_cycle
     output_path = args.output_path
     
-    output_list = makeThreeInput(input_nc=input_file,
-                                 cycle=autoregress_cycle,
-                                 output_path=output_path)
+    # If no output path is specified, create one based on the first input file
+    if output_path is None:
+        # Extract date from first input file for default output path
+        first_input = str(input_files[0])
+        init_date = xr.open_dataset(first_input)["time"].dt.date.values[0] - timedelta(days=1)
+        forecast_date = xr.open_dataset(first_input)["time"].dt.date.values[autoregress_cycle - 1]
+        output_path = Path(DEFAULT_OUTPUT_LOCATION) / f"{forecast_date}_init_from_{init_date}_multi"
+    
+    # Ensure output directory exists
+    os.makedirs(output_path, exist_ok=True)
+    print(f"Output directory: {output_path.resolve()}")
+    
+    # Process each input file
+    all_outputs = []
+    for i, input_file in enumerate(input_files):
+        print(f"\nProcessing file {i+1}/{len(input_files)}: {input_file.name}")
+        
+        # Create filename prefix to distinguish between different input files
+        filename_prefix = f"{input_file.stem}_" if len(input_files) > 1 else ""
+        
+        output_list = makeThreeInput(input_nc=str(input_file),
+                                     cycle=autoregress_cycle,
+                                     output_path=output_path,
+                                     filename_prefix=filename_prefix)
+        all_outputs.append(output_list)
+    
+    print(f"\nCompleted processing {len(input_files)} input files.")
+    print(f"All output files saved in: {output_path.resolve()}")
+    
+    return all_outputs
     
 if __name__ == "__main__" :
     main()
