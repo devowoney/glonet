@@ -92,6 +92,7 @@ class XrDataset(Dataset):
         self.split_ratios = split_ratios
         self.stat_path = stat_path
         self.random_seed = random_seed
+        self.shared_data = shared_data
         self.batch_size = batch_size  # Store for chunking
 
         # Create a cache key for this configuration
@@ -101,10 +102,10 @@ class XrDataset(Dataset):
         log.info(f"Creating XrDataset instance for split '{self.split}'")
         
         # Load and process data (using cache if available)
-        if shared_data is not None:
+        if self.shared_data is not None:
             log.info("Using shared preprocessed data")
             log.info(f"    ====")
-            self.data = shared_data
+            self.data = self.shared_data
         else:
             self.data = self._get_or_load_data()
             self.data = self._get_or_preprocess_data()
