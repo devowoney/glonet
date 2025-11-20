@@ -1,0 +1,30 @@
+# Main GLONET Configuration
+# ----------------------------- Configuration features
+# config/                       
+# ├── config.yaml               ✔
+# ├── model/                    
+# │   ├── glonet.yaml           
+# │   └── glonet_patch.yaml     
+# ├── data/                     
+# │   └── GLORYS12.yaml    
+# └── training/                 
+#     ├── default.yaml          
+#     └── fast.yaml             
+# -----------------------------
+
+defaults:
+  - model: glonet_patch
+  - data: GLORYS12
+  - training: optimic
+  - _self_
+
+# General settings
+seed: 42
+
+# Hydra settings
+run_name: debugrun
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${run_name}_${now:%H%M%S}
+  job:
+    name: ${run_name}

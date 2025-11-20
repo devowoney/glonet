@@ -1,0 +1,58 @@
+# Main GLONET Configuration
+# ----------------------------- Configuration features
+# config/                       
+# ├── config.yaml               
+# ├── model/                    
+# │   ├── glonet.yaml           
+# │   └── glonet_patch.yaml     
+# ├── data/                     
+# │   └── GLORYS12.yaml    
+# └── training/                 
+#     ├── default.yaml          
+#     ├── optimic.yaml          ✔
+#     └── fast.yaml             
+# -----------------------------
+
+callbacks:
+  monitor: "train_loss"
+  dirpath: ${hydra:run.dir}/checkpoints
+  filename: "best-model-{epoch:02d}-{train_loss:.2f}"
+  save_top_k: 3
+  mode: "min"
+
+tensorboard:  
+  save_dir: ${hydra:run.dir}
+  name: ${run_name}_${data.forecast_horizon}d_window
+  version: 1
+
+trainer:
+  epochs: 100
+  accelerator: "gpu"
+  devices: 1
+  log_every_n_steps: 1
+  grad_clip_norm: 1.0
+  precision: 32
+  num_sanity_val_steps: 1  
+  fast_dev_run: false     
+
+# Optimizer settings
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 1e-4
+  weight_decay: 1e-3
+  betas: [0.9, 0.999]
+
+# Scheduler settings
+scheduler:
+  _target_: torch.optim.lr_scheduler.CosineAnnealingLR
+  T_max: ${training.trainer.epochs}
+  eta_min: 1e-6
+
+# Loss function
+loss:
+  _target_: torch.nn.MSELoss
+
+# Resume from checkpoint
+resume:
+  enable_checkpoint: false              # Set to true to resume from checkpoint
+  checkpoint_path: "/Odyssey/private/j25lee/glonet/training/outputs/2025-10-29/debugrun_171400/checkpoints/test.ckpt"  
