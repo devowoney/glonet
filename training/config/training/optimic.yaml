@@ -4,13 +4,15 @@
 # ├── config.yaml               
 # ├── model/                    
 # │   ├── glonet.yaml           
-# │   └── glonet_patch.yaml     
+# │   ├── glonet_patch.yaml
+# │   └── optimic.yaml      
 # ├── data/                     
-# │   └── GLORYS12.yaml    
+# │   └── GLORYS12.yaml    ✔
 # └── training/                 
-#     ├── default.yaml          
-#     ├── optimic.yaml          ✔
-#     └── fast.yaml             
+#     ├── default.yaml
+#     ├── fast.yaml   
+#     └── optimic.yaml                   
+          
 # -----------------------------
 
 callbacks:
@@ -22,7 +24,7 @@ callbacks:
 
 tensorboard:  
   save_dir: ${hydra:run.dir}
-  name: ${run_name}_${data.forecast_horizon}d_window
+  name: testrun
   version: 1
 
 trainer:
@@ -37,16 +39,16 @@ trainer:
 
 # Optimizer settings
 optimizer:
-  _target_: torch.optim.Adam
-  lr: 1e-4
-  weight_decay: 1e-3
-  betas: [0.9, 0.999]
+  _target_: torch.optim.SGD
+  lr: 1e9
+  # weight_decay: 1e-3
+  # betas: [0.9, 0.999]
 
 # Scheduler settings
 scheduler:
   _target_: torch.optim.lr_scheduler.CosineAnnealingLR
   T_max: ${training.trainer.epochs}
-  eta_min: 1e-6
+  eta_min: 1e7
 
 # Loss function
 loss:

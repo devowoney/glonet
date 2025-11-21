@@ -65,13 +65,6 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset) :
         
         # Calculate statistics
         self.mean, self.std, self.min, self.max = self._calculate_statistics()
-        
-        # Get the specific sample
-        self.input_sequence, self.target, self.selected_date, self.land_mask = self._get_sample()
-        
-        # Standardization
-        self.mean, self.std = self._standardize()
-        self.stat_path = None
 
         
     def _load_data(self) -> xr.Dataset :
@@ -120,12 +113,14 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset) :
     def _generate_patch_indices(self) -> None:
         """Generate spatial patch indices based on patch_size that align with chunk size"""
         
-        if not self.enable_patching:
+        if not self.enable_patching :
             self.patch_indices  = [(0, 0)]  # Single patch covering full area
             self.num_patches = 1
             log.info("[!!]Spatial patching disabled - using full spatial extent")
             return
-            
+        
+        # !!! In Inition Condition Optimization by Gradient Descent, we use global patching approach !!!
+        # !!! But letting following code for future reference !!!
         lat_dim, lon_dim = self.spatial_dims
         lat_size = self.data.sizes[lat_dim]
         lon_size = self.data.sizes[lon_dim]
@@ -179,13 +174,20 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset) :
         dim_stat = [self.spatial_dims[0], self.spatial_dims[1]]
         input_sequence_persisted = self.data.isel(time=slice(self.sample_idx, self.sample_idx + self.sequence_length)).persist()
         
-        mean = torch.nan_to_num(input_sequence_persisted.mean(dim=dim_stat, keepdim=True))
-        std = torch.nan_to_num(input_sequence_persisted.std(dim=dim_stat, keepdim=True))
-        min = torch.nan_to_num(input_sequence_persisted.min(dim=dim_stat, keepdim=True))
-        max = torch.nan_to_num(input_sequence_persisted.max(dim=dim_stat, keepdim=True))
+        self.mean = input_sequence_persisted.mean(dim=dim_stat, skipna=True)
+        self.std = input_sequence_persisted.std(dim=dim_stat, skipna=True)
+        self.min = input_sequence_persisted.min(dim=dim_stat, skipna=True)
+        self.max = input_sequence_persisted.max(dim=dim_stat, skipna=True)
         
-        return mean, std, min, max
-
+        # Ensure no zero std values and handle NaN in std
+        # Iterate over the Dataset variables (should be just 'data')
+        for var_name in self.data.data_vars:
+            std_vals = self.std[var_name]
+            std_vals = xr.where(std_vals < 1e-8, 1e-8, std_vals)
+            self.std[var_name] = std_vals
+                    
+        return self.mean, self.std, self.min, self.max
+    
     def __len__(self) -> int :
         return len(self.valid_indices)
     
@@ -200,12 +202,16 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset) :
         """
 
         # Map split index to actual valid index
-        actual_idx = self.valid_indices[idx]
-        patch_idx, lat_start, lon_start = self.valid_indices[actual_idx]
+        patch_idx, lat_start, lon_start = self.valid_indices[idx]
         
         # Extract spatial patch coordinates
         lat_dim, lon_dim = self.spatial_dims
-        patch_lat, patch_lon = self.patch_size
+        
+        if self.enable_patching:
+            patch_lat, patch_lon = self.patch_size
+        else:
+            patch_lat = self.data.sizes[lat_dim]
+            patch_lon = self.data.sizes[lon_dim]
         
         lat_end = lat_start + patch_lat
         lon_end = lon_start + patch_lon
@@ -274,16 +280,31 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset) :
         # target: [C, H, W]
         target = np.concatenate(target_arrays, axis=0) if len(target_arrays) > 1 else target_arrays[0]
         
-        # Handle NaN values that might arise from division
-        input_sequence = np.nan_to_num(input_sequence, nan=0.0)
-        target = np.nan_to_num(target, nan=0.0)
-
-        # Convert to torch tensors
-        input_sequence = torch.from_numpy(input_sequence).float()
-        target = torch.from_numpy(target).float()
+        # Make 3 divided arrays for 3 pretrained models 
+        input_sequence_1 = input_sequence[:, :5, :, :]
+        input_sequence_2 = input_sequence[:, 5:45, :, :]
+        input_sequence_3 = input_sequence[:, 45:85, :, :]
+        target_1 = target[:5, :, :]
+        target_2 = target[5:45, :, :]
+        target_3 = target[45:85, :, :]
         
-        return input_sequence, target
+        # Convert to torch tensors
+        input_sequence_1 = torch.from_numpy(input_sequence_1).float()
+        input_sequence_2 = torch.from_numpy(input_sequence_2).float()
+        input_sequence_3 = torch.from_numpy(input_sequence_3).float()
+        target_1 = torch.from_numpy(target_1).float()
+        target_2 = torch.from_numpy(target_2).float()
+        target_3 = torch.from_numpy(target_3).float()
+        
+        # Handle NaN values that might arise from division
+        input_sequence_1 = torch.nan_to_num(input_sequence_1, nan=0.0)
+        input_sequence_2 = torch.nan_to_num(input_sequence_2, nan=0.0)
+        input_sequence_3 = torch.nan_to_num(input_sequence_3, nan=0.0)
+        target_1 = torch.nan_to_num(target_1, nan=0.0)
+        target_2 = torch.nan_to_num(target_2, nan=0.0)
+        target_3 = torch.nan_to_num(target_3, nan=0.0)
 
+        return input_sequence_1, input_sequence_2, input_sequence_3, target_1, target_2, target_3
 
 
 
@@ -292,6 +313,7 @@ class GlorysDataModule(pl.LightningDataModule) :
         super().__init__()
         
         # Extract configuration parameters
+        self.cfg = cfg
         self.data_cfg = cfg.data
 
         # Dataset parameters
@@ -301,7 +323,7 @@ class GlorysDataModule(pl.LightningDataModule) :
             'spatial_dims' : self.data_cfg.get('dimensions', {}).get('spatial', ['lat', 'lon']),
             'time_dim' : self.data_cfg.get('dimensions', {}).get('time', 'time'),
             'patch_size': tuple(self.data_cfg.get('computing', {}).get('patch_size', [96, 96])),
-            'enable_patching': self.data_cfg.get('computing', {}).get('enable_patching', True),
+            'enable_patching': self.data_cfg.get('computing', {}).get('enable_patching', False),
             'sequence_length' : self.data_cfg.get('sequence_length', 2),
             'forecast_horizon' : self.data_cfg.get('forecast_horizon', 10),
             'crop_zone' : self.data_cfg.get('preprocessing', {}).get('crop_zone', None),
@@ -311,21 +333,23 @@ class GlorysDataModule(pl.LightningDataModule) :
             'batch_size': self.data_cfg.get('dataloader', {}).get('batch_size', 8),  # For chunking alignment
         } 
 
-    def setup(self) :
-        """Setup"""
+    def setup(self, stage: Optional[str] = None) :
+        """Setup - only creates train dataset for optimization"""
         
         # Create training dataset for optimizing initial condition
         ds_params = self.dataset_params.copy()
         self.train_dataset = OptimizeInitialConditionDataset(**ds_params)
 
     def train_dataloader(self) -> DataLoader :
-        
-        self.setup()
+        # For single-sample optimization, disable multiprocessing and shuffling
+        # to avoid hanging issues
+        num_samples = len(self.train_dataset)
+        use_multiprocessing = num_samples > 1
         
         return DataLoader(self.train_dataset, 
-                          shuffle=True, 
+                          shuffle=use_multiprocessing,  # No shuffle for single sample
                           batch_size=self.data_cfg.get('dataloader', {}).get('batch_size', 1),
-                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4),
+                          num_workers=self.data_cfg.get('dataloader', {}).get('num_workers', 4) if use_multiprocessing else 0,
                           pin_memory=self.data_cfg.get('dataloader', {}).get('pin_memory', True))
 
     def val_dataloader(self) -> DataLoader :

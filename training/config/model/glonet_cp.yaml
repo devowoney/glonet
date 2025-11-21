@@ -1,11 +1,11 @@
-# Main GLONET Configuration
+# GLONET Training Configuration
 # ----------------------------- Configuration features
 # config/                       
-# ├── config.yaml          ✔     
+# ├── config.yaml               
 # ├── model/                    
 # │   ├── glonet.yaml           
 # │   ├── glonet_patch.yaml
-# │   └── glonet_cp.yaml      
+# │   └── glonet_cp.yaml   ✔   
 # ├── data/                     
 # │   └── GLORYS12.yaml    
 # └── training/                 
@@ -15,19 +15,9 @@
           
 # -----------------------------
 
-defaults:
-  - model: glonet_cp
-  - data: GLORYS12_0125
-  - training: optimic
-  - _self_
+checkpoint_paths: # Pre-trained model checkpoint paths. Need 3 parts for surface, shallow and deep ocean variables.
+  part_1: "/Odyssey/public/glonet/TrainedWeights/glonet_part1.pth"
+  part_2: "/Odyssey/public/glonet/TrainedWeights/glonet_part2.pth"
+  part_3: "/Odyssey/public/glonet/TrainedWeights/glonet_part3.pth"
 
-# General settings
-seed: 42
-
-# Hydra settings
-run_name: debug_optimIC
-hydra:
-  run:
-    dir: ./outputs/${run_name}/${now:%Y-%m-%d-%H%M%S}
-  job:
-    name: ${run_name}
+patch_size: ${computing.patch_size}

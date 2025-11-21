@@ -1,3 +1,4 @@
+import hydra
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -14,7 +15,7 @@ from hydra.utils import instantiate
 
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent / "src/glonet"))
+sys.path.append(str(Path(__file__).parent.parent.parent / "src/glonet"))
 from modelp2 import Glonet 
 
 import logging
@@ -87,52 +88,75 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
         
         # Store config for optimizer parameters
         self.cfg = cfg
+        self.model_cfg = self.cfg.model
         
-        # init_input will be created once 
-        self.init_sequence = None
-        self.target = None
+
         self.loss_fn = None
-        self._ic_optimizer = None
-        self._ic_scheduler = None
+        self.optimizer = None
+        self.scheduler = None
         
-        # initialize mean and std for standarization
-        self.dataset = None
-        self.mean = None
-        self.std = None
+        # Initial conditions to be set on first batch
+        self.init_input1 = None
+        self.init_input2 = None
+        self.init_input3 = None
+        self.target1 = None
+        self.target2 = None
+        self.target3 = None
+        self._initialized = False
         
-        self.save_path = None
-        self.current_loss = float('inf')
-        self.best_loss = float('inf')
-        self.best_init = None
+        # Loss function
+        self.loss_fn = hydra.utils.instantiate(self.cfg.training.loss)
         
         # Load pytorch checkpoint
         log.info("Loading checkpoint...")
-        self.checkpoint = torch.load(self.cfg.model_path, map_location=torch.device('cuda'))
+        self.checkpoint_1 = torch.load(self.model_cfg.checkpoint_paths.part_1, map_location=torch.device('cuda'))
+        self.checkpoint_2 = torch.load(self.model_cfg.checkpoint_paths.part_2, map_location=torch.device('cuda'))
+        self.checkpoint_3 = torch.load(self.model_cfg.checkpoint_paths.part_3, map_location=torch.device('cuda'))
 
         # Create new gradient checkpointing model instance
-        self.gradcheckp_model = GlonetGradientCheckpointing(shape_in=(2, 85, 672, 1440))
-
+        if self.cfg.data.computing.enable_patching :
+            patch_size = self.model_cfg.patch_size
+            self.gradcheckp_model_1 = GlonetGradientCheckpointing(shape_in=(2, 5, patch_size[0], patch_size[1]))
+            self.gradcheckp_model_2 = GlonetGradientCheckpointing(shape_in=(2, 40, patch_size[0], patch_size[1]))            
+            self.gradcheckp_model_3 = GlonetGradientCheckpointing(shape_in=(2, 40, patch_size[0], patch_size[1]))
+        else :
+            self.gradcheckp_model_1 = GlonetGradientCheckpointing(shape_in=(2, 5, 672, 1440))
+            self.gradcheckp_model_2 = GlonetGradientCheckpointing(shape_in=(2, 40, 672, 1440))            
+            self.gradcheckp_model_3 = GlonetGradientCheckpointing(shape_in=(2, 40, 672, 1440))
+            
         # Load the same weights from the original model
-        self.gradcheckp_model.load_state_dict(self.checkpoint['model_state_dict'])
-        self.gradcheckp_model.eval()
+        self.gradcheckp_model_1.load_state_dict(self.checkpoint_1['model_state_dict'])
+        self.gradcheckp_model_1.train()
+        self.gradcheckp_model_2.load_state_dict(self.checkpoint_2['model_state_dict'])
+        self.gradcheckp_model_2.train()
+        self.gradcheckp_model_3.load_state_dict(self.checkpoint_3['model_state_dict'])
+        self.gradcheckp_model_3.train()
         
         # Freeze model parameters — we only optimize the initial condition
-        for param in self.gradcheckp_model.parameters():
+        for param in self.gradcheckp_model_1.parameters():
+            param.requires_grad = False
+        for param in self.gradcheckp_model_2.parameters():
+            param.requires_grad = False
+        for param in self.gradcheckp_model_3.parameters():
             param.requires_grad = False
             
-        log.info(f"Frozen {sum(1 for _ in self.gradcheckp_model.parameters())} parameters")
+        log.info(f"Frozen {sum(1 for _ in self.gradcheckp_model_1.parameters()) * 3} parameters for models part1, 2 and 3")
+
 
     def forward(self, 
-                x : torch.Tensor = None) -> torch.Tensor :
+                x1 : torch.Tensor = None,
+                x2 : torch.Tensor = None,
+                x3 : torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor] :
         """Forward pass through the saved model with forecast window iterations."""
         
-        if x is not None and not x.requires_grad:
-            log.warning(f"Input tensor does not require grad: {x.requires_grad}")
+        if x1 is not None and not x1.requires_grad:
+            log.warning(f"Input tensor does not require grad: {x1.requires_grad}")
         
         try:
             # !!! Not explicit device handling : model is hardcoded to cuda in JIT
             with torch.enable_grad():
-                return self.gradcheckp_model(x)
+                
+                return self.gradcheckp_model_1(x1), self.gradcheckp_model_2(x2), self.gradcheckp_model_3(x3)
             
         except RuntimeError as e:
             if "CUDA" in str(e) or "cuda" in str(e):
@@ -144,36 +168,63 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
             else:
                 raise e
 
-    def step(self) -> float :
+    def step(self, 
+             batch : tuple) -> float :
         """Single optimization step."""
+    
+        y1_hat, y2_hat, y3_hat = self.forward(self.init_input1, 
+                                              self.init_input2, 
+                                              self.init_input3)
         
-        y_hat = self.forward(self.init_input)
-        loss = self.loss_fn(y_hat, self.target)
+        loss = (self.loss_fn(y1_hat, self.target1) + 
+                self.loss_fn(y2_hat, self.target2) + 
+                self.loss_fn(y3_hat, self.target3))
         
         return loss
 
-    def training_step(self) -> float :
-        """Define training step - init_input is already created in on_train_start."""
+    def training_step(self, batch) -> float :
+        """Define training step - initialize on first call."""
+        
+        # Initialize on first batch
+        if not self._initialized:
+            x1, x2, x3, y1, y2, y3 = batch
+            self.init_input1 = nn.Parameter(x1.detach().clone(), requires_grad=True)
+            self.init_input2 = nn.Parameter(x2.detach().clone(), requires_grad=True)
+            self.init_input3 = nn.Parameter(x3.detach().clone(), requires_grad=True)
+            self.target1 = y1
+            self.target2 = y2
+            self.target3 = y3
+            self._initialized = True
+            
+            # Re-initialize optimizer with the new parameters
+            self.trainer.strategy.setup_optimizers(self.trainer)
         
         # For JIT models, we might need to explicitly enable gradients
         with torch.enable_grad():
-            train_loss = self.step()
+            train_loss = self.step(batch)
 
             # Log metrics
             self.log('train_loss', train_loss, on_step=True, on_epoch=True, prog_bar=True)
             self.log('learning_rate', self.trainer.optimizers[0].param_groups[0]['lr'], on_step=True)
             
             return train_loss
-
-    def on_train_start(self, 
-                       batch : tuple) -> None :
-        """Initialize init_input and optimizer once before training starts."""
-        
-        # Create Parameter for optimization - keep this standardized so gradients flow
-        x, y = batch
-        self.init_input = nn.Parameter(x.detach().clone().unsqueeze(0), requires_grad=True)
-        self.target = y
-        
+    
+    def on_train_epoch_end(self) -> None:
+        """Called at the end of each training epoch to log gradient norms."""
+        if self._initialized:
+            # Calculate gradient norms for each initial condition
+            grad_norm_1 = self.init_input1.grad.norm().item() if self.init_input1.grad is not None else 0.0
+            grad_norm_2 = self.init_input2.grad.norm().item() if self.init_input2.grad is not None else 0.0
+            grad_norm_3 = self.init_input3.grad.norm().item() if self.init_input3.grad is not None else 0.0
+            
+            # Log gradient norms
+            self.log('grad_norm/input1', grad_norm_1, on_epoch=True, prog_bar=False)
+            self.log('grad_norm/input2', grad_norm_2, on_epoch=True, prog_bar=False)
+            self.log('grad_norm/input3', grad_norm_3, on_epoch=True, prog_bar=False)
+            
+            log.info(f"Epoch {self.current_epoch} - Gradient Norms: "
+                    f"input1={grad_norm_1:.6f}, input2={grad_norm_2:.6f}, "
+                    f"input3={grad_norm_3:.6f}")
         
     def configure_optimizers(self) -> Dict[str, Any]:
         """Configure optimizer and learning rate scheduler"""
@@ -197,5 +248,3 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
             
         return optimizer
     
-
-

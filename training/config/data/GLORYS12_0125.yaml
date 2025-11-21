@@ -4,15 +4,18 @@
 # ├── config.yaml               
 # ├── model/                    
 # │   ├── glonet.yaml           
-# │   └── glonet_small.yaml     
+# │   ├── glonet_patch.yaml
+# │   └── optimic.yaml      
 # ├── data/                     
-# │   └── GLORYS12_0125.yaml    ✔
+# │   └── GLORYS12.yaml    ✔
 # └── training/                 
-#     ├── default.yaml          
-#     └── fast.yaml              
+#     ├── default.yaml
+#     ├── fast.yaml   
+#     └── optimic.yaml                   
+          
 # -----------------------------
 
-data_paths: "/Odyssey/public/glonet/glorys12_1993-01-01_to_1993-12-31_init_states/combined_input.nc"
+data_paths: "/Odyssey/public/glonet/glorys12_1993-01-01_to_1993-06-30_init_states/combined_input.nc"
 variables: ["data"]
 
 dimensions:
@@ -20,25 +23,26 @@ dimensions:
   time: "time"
 
 computing:
-  time_minibatch_size: 15
+  # time_minibatch_size: 15
   patch_size: [96, 96]
-  enable_time_minibatching: true
-  enable_patching: true
+  enable_patching: false
 
 sequence_length: 2
-forecast_horizon: 10
+forecast_horizon: 1
 
 preprocessing:
   crop_zone: null
   normalize: false
   standardize: true
 
-train_split: 0.8
-val_split: 0.1
-test_split: 0.1
+# train_split: 0.8
+# val_split: 0.1
+# test_split: 0.1
 
-statistics:
-  stat_path: ${hydra:run.dir}/statistics.stat
+# statistics:
+#   stat_path: ${hydra:run.dir}/statistics.stat
 
 dataloader:
-  num_workers: 4
+  batch_size: 32
+  num_workers: 8
+  pin_memory: true
