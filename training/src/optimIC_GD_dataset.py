@@ -324,6 +324,7 @@ class GlorysDataModule(pl.LightningDataModule) :
             'time_dim' : self.data_cfg.get('dimensions', {}).get('time', 'time'),
             'patch_size': tuple(self.data_cfg.get('computing', {}).get('patch_size', [96, 96])),
             'enable_patching': self.data_cfg.get('computing', {}).get('enable_patching', False),
+            'sample_idx' : self.data_cfg.get('sample_idx', 0),
             'sequence_length' : self.data_cfg.get('sequence_length', 2),
             'forecast_horizon' : self.data_cfg.get('forecast_horizon', 10),
             'crop_zone' : self.data_cfg.get('preprocessing', {}).get('crop_zone', None),

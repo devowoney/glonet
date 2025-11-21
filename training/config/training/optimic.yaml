@@ -24,7 +24,7 @@ callbacks:
 
 tensorboard:  
   save_dir: ${hydra:run.dir}
-  name: testrun
+  name: lr_setting
   version: 1
 
 trainer:
@@ -40,7 +40,7 @@ trainer:
 # Optimizer settings
 optimizer:
   _target_: torch.optim.SGD
-  lr: 1e9
+  lr: 1e7
   # weight_decay: 1e-3
   # betas: [0.9, 0.999]
 
@@ -48,7 +48,7 @@ optimizer:
 scheduler:
   _target_: torch.optim.lr_scheduler.CosineAnnealingLR
   T_max: ${training.trainer.epochs}
-  eta_min: 1e7
+  eta_min: 1e5
 
 # Loss function
 loss:

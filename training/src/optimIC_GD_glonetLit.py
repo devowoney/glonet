@@ -1,13 +1,8 @@
 import hydra
 import torch
 from torch import nn
-import torch.nn.functional as F
-# import torch.fft
-import numpy as np
-import torch.optim as optimizer
 import pytorch_lightning as pl
 from typing import Dict, Any, Tuple
-import xarray as xr
 from hydra.utils import instantiate
 
 # from blocks import *

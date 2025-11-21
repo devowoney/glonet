@@ -5,7 +5,7 @@
 # ├── model/                    
 # │   ├── glonet.yaml           
 # │   ├── glonet_patch.yaml
-# │   └── optimic.yaml      
+# │   └── glonet_cp.yaml     
 # ├── data/                     
 # │   └── GLORYS12.yaml    ✔
 # └── training/                 
@@ -27,6 +27,7 @@ computing:
   patch_size: [96, 96]
   enable_patching: false
 
+sample_idx: 0
 sequence_length: 2
 forecast_horizon: 1
 
