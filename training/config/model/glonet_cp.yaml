@@ -21,3 +21,5 @@ checkpoint_paths: # Pre-trained model checkpoint paths. Need 3 parts for surface
   part_3: "/Odyssey/public/glonet/TrainedWeights/glonet_part3.pth"
 
 patch_size: ${computing.patch_size}
+
+output_path: ${hydra:run.dir}/output_saving

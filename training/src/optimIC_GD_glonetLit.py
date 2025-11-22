@@ -4,6 +4,9 @@ from torch import nn
 import pytorch_lightning as pl
 from typing import Dict, Any, Tuple
 from hydra.utils import instantiate
+import xarray as xr
+import numpy as np
+import os
 
 # from blocks import *
 # from NN import *
@@ -204,9 +207,10 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
             
             return train_loss
     
-    def on_train_epoch_end(self) -> None:
+    def on_train_epoch_end(self) -> None :
         """Called at the end of each training epoch to log gradient norms."""
-        if self._initialized:
+        
+        if self._initialized :
             # Calculate gradient norms for each initial condition
             grad_norm_1 = self.init_input1.grad.norm().item() if self.init_input1.grad is not None else 0.0
             grad_norm_2 = self.init_input2.grad.norm().item() if self.init_input2.grad is not None else 0.0
@@ -220,6 +224,86 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
             log.info(f"Epoch {self.current_epoch} - Gradient Norms: "
                     f"input1={grad_norm_1:.6f}, input2={grad_norm_2:.6f}, "
                     f"input3={grad_norm_3:.6f}")
+        
+    def on_train_end(self) -> None :
+        """Save optimized initial condition at the end of the training as netCDF"""
+        
+        if self._initialized :
+            # Convert tensors to numpy arrays and squeeze batch dimension
+            # Shape: [batch, time, channels, height, width] -> [time, channels, height, width]
+            init1_np = self.init_input1.detach().cpu().numpy().squeeze(0)
+            init2_np = self.init_input2.detach().cpu().numpy().squeeze(0)
+            init3_np = self.init_input3.detach().cpu().numpy().squeeze(0)
+            
+            # Get dimensions: [time, channels, height, width]
+            time, channel, height, width = init1_np.shape
+            time2, channel2, height2, width2 = init2_np.shape
+            
+            # Create coordinate arrays
+            coords1 = {
+                'time': np.arange(time),
+                'ch': np.arange(channel),
+                'lat': np.arange(height),
+                'lon': np.arange(width)
+            }
+            coords2 = {
+                'time': np.arange(time2),
+                'ch': np.arange(channel2),
+                'lat': np.arange(height2),
+                'lon': np.arange(width2)
+            }
+            # Create separate xarray Datasets for each initial condition
+            ds1 = xr.Dataset({
+                'data': (['time', 'ch', 'lat', 'lon'], init1_np)
+            }, coords=coords1)
+            
+            ds2 = xr.Dataset({
+                'data': (['time', 'ch', 'lat', 'lon'], init2_np)
+            }, coords=coords2)
+            
+            ds3 = xr.Dataset({
+                'data': (['time', 'ch', 'lat', 'lon'], init3_np)
+            }, coords=coords2)
+            
+            # Add metadata attributes to each dataset
+            for i, ds in enumerate([ds1, ds2, ds3], start=1):
+                ds.attrs['description'] = f'Optimized initial condition part {i} from gradient descent'
+                ds.attrs['creation_date'] = str(np.datetime64('now'))
+                ds.attrs['model_config'] = str(self.cfg.model)
+                ds.attrs['training_epochs'] = self.current_epoch
+                ds['data'].attrs['long_name'] = f'Optimized initial condition part {i}'
+                ds['data'].attrs['units'] = 'model_units'
+            
+            # Prepare save paths
+            save_path = self.cfg.model.get('output_path', 'optimized_ic')
+            if save_path.endswith('.pt'):
+                base_path = save_path.replace('.pt', '')
+            elif save_path.endswith('.nc'):
+                base_path = save_path.replace('.nc', '')
+            elif save_path.endswith('/'):
+                base_path = save_path.replace('/', '')
+            else:
+                base_path = save_path
+            
+            # Create output directory if it doesn't exist
+            os.makedirs(base_path, exist_ok=True)
+            
+            # Save each dataset to separate netCDF files with compression
+            encoding = {'data': {'zlib': True, 'complevel': 4}}
+            
+            path1 = f"{base_path}/optimal_input1.nc"
+            path2 = f"{base_path}/optimal_input2.nc"
+            path3 = f"{base_path}/optimal_input3.nc"
+            
+            ds1.to_netcdf(path1, encoding=encoding)
+            ds2.to_netcdf(path2, encoding=encoding)
+            ds3.to_netcdf(path3, encoding=encoding)
+            
+            log.info(f"Saved optimized initial conditions (netCDF format):")
+            log.info(f"  Optimized input 1: {path1} - shape {init1_np.shape}")
+            log.info(f"  Optimized input 2: {path2} - shape {init2_np.shape}")
+            log.info(f"  Optimized input 3: {path3} - shape {init3_np.shape}")
+        
         
     def configure_optimizers(self) -> Dict[str, Any]:
         """Configure optimizer and learning rate scheduler"""
