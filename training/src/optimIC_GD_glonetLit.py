@@ -102,7 +102,7 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
         self.target3 = None
         self._initialized = False
         self.coords = None
-        self.dataset = None  # Reference to the dataset instance 
+        self.dataset = None  # Reference to the dataset instance
         
         # Loss function
         self.loss_fn = hydra.utils.instantiate(self.cfg.training.loss)
@@ -332,7 +332,13 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
             log.info(f"  Optimized input 1: {path1} - shape {init1_np.shape}")
             log.info(f"  Optimized input 2: {path2} - shape {init2_np.shape}")
             log.info(f"  Optimized input 3: {path3} - shape {init3_np.shape}")
-        
+            
+    def on_after_backward(self):
+        # mask ic gradients so land stays zero
+        with torch.no_grad():
+            self.init_input1.grad *= self.dataset.ocean_mask_1.to(self.device)
+            self.init_input2.grad *= self.dataset.ocean_mask_2.to(self.device)
+            self.init_input3.grad *= self.dataset.ocean_mask_3.to(self.device)
         
     def configure_optimizers(self) -> Dict[str, Any]:
         """Configure optimizer and learning rate scheduler"""

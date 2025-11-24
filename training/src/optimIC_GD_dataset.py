@@ -65,7 +65,9 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset) :
         
         # Calculate statistics
         self.mean, self.std, self.min, self.max = self._calculate_statistics()
-
+        
+        # Create ocean masks for three different depth inputs (full spatial extent)
+        self._create_full_ocean_masks()
         
     def _load_data(self) -> xr.Dataset :
         """Load netcdf file using dask array"""
@@ -188,11 +190,72 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset) :
                     
         return self.mean, self.std, self.min, self.max
     
+    def _create_full_ocean_masks(self) -> None:
+        """Create full spatial extent ocean masks for three different depth inputs based on NaN values.
+        
+        Creates three masks for the full spatial extent:
+        - input1 (surface): channels 0-4
+        - input2 (shallow): channels 5-44 (10 depth levels each of thetao, uo, vo)
+        - input3 (deep): channels 45-84 (10 depth levels each of thetao, uo, vo)
+        
+        Ocean mask = 1 - land_mask, where land_mask is 1 for NaN locations.
+        Stored as numpy arrays [C, H, W] for efficient patching in __getitem__.
+        """
+        log.info("Creating full ocean masks for three depth inputs...")
+        
+        # Get a sample time slice to extract spatial NaN pattern
+        sample_data = self.data.isel({self.time_dim: self.sample_idx})
+        
+        # Extract data and convert to numpy
+        data_values = sample_data['data'].persist().values  # Shape: [C, H, W]
+        
+        # Create land masks (1 where NaN, 0 where valid) for each channel
+        land_mask = np.isnan(data_values).astype(np.float32)  # [C, H, W]
+        
+        # Split into three depth ranges and create ocean masks
+        # input1: surface (channels 0-4)
+        self.full_ocean_mask_1 = 1.0 - land_mask[0:5, :, :]  # [5, H, W]
+        
+        # input2: shallow (channels 5-44)
+        self.full_ocean_mask_2 = 1.0 - land_mask[5:45, :, :]  # [40, H, W]
+        
+        # input3: deep (channels 45-84)
+        self.full_ocean_mask_3 = 1.0 - land_mask[45:85, :, :]  # [40, H, W]
+        
+        log.info(f"Full ocean mask 1 (surface, ch 0-4) shape: {self.full_ocean_mask_1.shape}")
+        log.info(f"Full ocean mask 2 (shallow, ch 5-44) shape: {self.full_ocean_mask_2.shape}")
+        log.info(f"Full ocean mask 3 (deep, ch 45-84) shape: {self.full_ocean_mask_3.shape}")
+        log.info(f"    ====")
+    
+    def _get_patch_ocean_masks(self, lat_start: int, lat_end: int, lon_start: int, lon_end: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Extract ocean masks for a specific spatial patch.
+        
+        Args:
+            lat_start, lat_end, lon_start, lon_end: Patch coordinates
+            
+        Returns:
+            Tuple of three ocean masks as torch tensors [C, H, W]
+            These will auto-broadcast to [T, C, H, W] when multiplied with input sequences.
+        """
+        # Extract patches from full masks
+        ocean_mask_1 = self.full_ocean_mask_1[:, lat_start:lat_end, lon_start:lon_end]
+        ocean_mask_2 = self.full_ocean_mask_2[:, lat_start:lat_end, lon_start:lon_end]
+        ocean_mask_3 = self.full_ocean_mask_3[:, lat_start:lat_end, lon_start:lon_end]
+        
+        # Convert to torch tensors
+        ocean_mask_1 = torch.from_numpy(ocean_mask_1.copy()).float()
+        ocean_mask_2 = torch.from_numpy(ocean_mask_2.copy()).float()
+        ocean_mask_3 = torch.from_numpy(ocean_mask_3.copy()).float()
+        
+        return ocean_mask_1, ocean_mask_2, ocean_mask_3
+    
+    
     def __len__(self) -> int :
         return len(self.valid_indices)
     
     def __getitem__(self, 
-                    idx : int) -> Tuple[torch.Tensor, torch.Tensor] :
+                    idx : int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, 
+                                        torch.Tensor, torch.Tensor, torch.Tensor] :
         """
         Get a set of input sequences and its corresponding target
 
@@ -310,9 +373,15 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset) :
         target_1 = torch.nan_to_num(target_1, nan=0.0)
         target_2 = torch.nan_to_num(target_2, nan=0.0)
         target_3 = torch.nan_to_num(target_3, nan=0.0)
+        
+        # Get ocean masks for this patch
+        # Shape: [C, H, W] - will auto-broadcast to [T, C, H, W] when needed
+        self.ocean_mask_1, self.ocean_mask_2, self.ocean_mask_3 = self._get_patch_ocean_masks(lat_start, 
+                                                                                               lat_end, 
+                                                                                               lon_start, 
+                                                                                               lon_end)
 
         return input_sequence_1, input_sequence_2, input_sequence_3, target_1, target_2, target_3
-
 
 
 class GlorysDataModule(pl.LightningDataModule) :

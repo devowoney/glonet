@@ -25,7 +25,7 @@ defaults:
 seed: 42
 
 # Hydra settings
-run_name: testrun
+run_name: optimIC_GD
 hydra:
   run:
     dir: ./outputs/${run_name}/${now:%Y-%m-%d-%H%M%S}
