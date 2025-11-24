@@ -101,6 +101,8 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
         self.target2 = None
         self.target3 = None
         self._initialized = False
+        self.coords = None
+        self.dataset = None  # Reference to the dataset instance 
         
         # Loss function
         self.loss_fn = hydra.utils.instantiate(self.cfg.training.loss)
@@ -183,8 +185,14 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
     def training_step(self, batch) -> float :
         """Define training step - initialize on first call."""
         
-        # Initialize on first batch
+        # Store reference dataset
         if not self._initialized:
+            # Store reference to dataset via trainer.datamodule
+            if hasattr(self.trainer, 'datamodule') and hasattr(self.trainer.datamodule, 'train_dataset'):
+                self.dataset = self.trainer.datamodule.train_dataset
+                log.info(f"Dataset reference stored in Lightning module")
+                
+        # Initialize on first batch            
             x1, x2, x3, y1, y2, y3 = batch
             self.init_input1 = nn.Parameter(x1.detach().clone(), requires_grad=True)
             self.init_input2 = nn.Parameter(x2.detach().clone(), requires_grad=True)
@@ -239,19 +247,40 @@ class GlonetGradientInitialCondition(pl.LightningModule) :
             time, channel, height, width = init1_np.shape
             time2, channel2, height2, width2 = init2_np.shape
             
-            # Create coordinate arrays
+            self.coords = self.dataset.current_coords
+            
+            # Extract coordinates from stored batch coordinates
+            if self.coords is not None:
+                # Get coordinates from the batch
+                # Check if coordinates are numpy arrays or have multiple dimensions (batched)
+                time_coords = self.coords['time']
+                lat_coords = self.coords['lat']
+                lon_coords = self.coords['lon']
+            else:
+                # Fallback: create simple index-based coordinates
+                log.warning(f"No coordinates found in the batch; using default indices instead.")
+                time_coords = np.arange(time)
+                lat_coords = np.arange(height)
+                lon_coords = np.arange(width)
+            
+            # Create channel coordinates
+            ch_coords_1 = np.arange(channel)
+            ch_coords_2 = np.arange(channel2)
+            
+            # Create coordinate dictionaries
             coords1 = {
-                'time': np.arange(time),
-                'ch': np.arange(channel),
-                'lat': np.arange(height),
-                'lon': np.arange(width)
+                'time': time_coords,
+                'ch': ch_coords_1,
+                'lat': lat_coords,
+                'lon': lon_coords
             }
             coords2 = {
-                'time': np.arange(time2),
-                'ch': np.arange(channel2),
-                'lat': np.arange(height2),
-                'lon': np.arange(width2)
+                'time': time_coords,
+                'ch': ch_coords_2,
+                'lat': lat_coords,
+                'lon': lon_coords
             }
+            
             # Create separate xarray Datasets for each initial condition
             ds1 = xr.Dataset({
                 'data': (['time', 'ch', 'lat', 'lon'], init1_np)

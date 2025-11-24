@@ -231,6 +231,13 @@ class OptimizeInitialConditionDataset(torch.utils.data.Dataset) :
             lon_dim: slice(lon_start, lon_end)
         })
         
+        # Store coordinates for later use (before converting to numpy)
+        self.current_coords = {
+            'time': input_sequence[self.time_dim].values,
+            'lat': input_sequence[lat_dim].values,
+            'lon': input_sequence[lon_dim].values
+        }
+        
         # Convert to torch tensors and stack variables along channel dimension
         # Input sequence: [T, C, H, W]
         input_arrays = []

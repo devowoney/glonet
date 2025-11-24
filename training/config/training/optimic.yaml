@@ -24,11 +24,11 @@ callbacks:
 
 tensorboard:  
   save_dir: ${hydra:run.dir}
-  name: convergence
-  version: 1
+  name: output_coords
+  version: 3
 
 trainer:
-  epochs: 300
+  epochs: 3
   accelerator: "gpu"
   devices: 1
   log_every_n_steps: 1
