@@ -30,7 +30,7 @@ from optimIC_GD_glonetLit import GlonetGradientCheckpointing
 
 # Constants
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
-now = datetime.now().strftime('%Y%m%d-%H%M%S')
+now = datetime.now().strftime('%Y-%m-%d-%H%M%S')
 DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/training/outputs/man_optimIC_GD/{now}"
 
 # Setup logging
@@ -108,6 +108,12 @@ class ManualGradientDescent:
         self.ocean_mask_3 = None
         self.coords = None
         
+        # Track best predictions
+        self.best_loss = float('inf')
+        self.best_y_hat1 = None
+        self.best_y_hat2 = None
+        self.best_y_hat3 = None
+        
     def _load_checkpoint_model(self, checkpoint_path: str, shape_in: Tuple[int, int, int, int]) -> torch.nn.Module:
         """Load a checkpoint-based model with gradient checkpointing."""
         # Load checkpoint
@@ -174,6 +180,7 @@ class ManualGradientDescent:
         # Store coordinates
         self.coords = {
             'time': input_sequence['time'].values,
+            'target_time': target['time'].values,
             'lat': input_sequence['lat'].values,
             'lon': input_sequence['lon'].values
         }
@@ -570,6 +577,14 @@ class ManualGradientDescent:
             # Store loss
             loss_history.append(total_loss.item())
             
+            # Update best predictions if this is the best loss so far
+            if total_loss.item() < self.best_loss:
+                self.best_loss = total_loss.item()
+                with torch.no_grad():
+                    self.best_y_hat1 = y_hat1.detach().clone()
+                    self.best_y_hat2 = y_hat2.detach().clone()
+                    self.best_y_hat3 = y_hat3.detach().clone()
+            
             # Compute gradient norms
             grad_norm_1 = self.x0_1.grad.norm().item() if self.x0_1.grad is not None else 0.0
             grad_norm_2 = self.x0_2.grad.norm().item() if self.x0_2.grad is not None else 0.0
@@ -680,6 +695,97 @@ class ManualGradientDescent:
         log.info(f"  {path2} - shape {opt_x0_2_np.shape}")
         log.info(f"  {path3} - shape {opt_x0_3_np.shape}")
     
+    def save_best_predictions(self, output_dir: str) -> None:
+        """Save best predictions (y_hat) as netCDF files."""
+        log.info(f"\nSaving best predictions to {output_dir}...")
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        if self.best_y_hat1 is None:
+            log.warning("No best predictions found to save.")
+            return
+        
+        # Convert to numpy and remove batch dimension
+        y_hat1_np = self.best_y_hat1.cpu().numpy().squeeze(0)  # [C, H, W]
+        y_hat2_np = self.best_y_hat2.cpu().numpy().squeeze(0)
+        y_hat3_np = self.best_y_hat3.cpu().numpy().squeeze(0)
+        
+        # Add time dimension (expand to [1, C, H, W])
+        y_hat1_np = np.expand_dims(y_hat1_np, axis=0)
+        y_hat2_np = np.expand_dims(y_hat2_np, axis=0)
+        y_hat3_np = np.expand_dims(y_hat3_np, axis=0)
+        
+        # Get dimensions
+        time_dim, channel1, height, width = y_hat1_np.shape
+        _, channel2, _, _ = y_hat2_np.shape
+        _, channel3, _, _ = y_hat3_np.shape
+        
+        # Get target time
+        target_time = np.array([self.coords['target_time']])
+        
+        # Create coordinate dictionaries
+        coords1 = {
+            'time': target_time,
+            'ch': np.arange(channel1),
+            'lat': self.coords['lat'],
+            'lon': self.coords['lon']
+        }
+        coords2 = {
+            'time': target_time,
+            'ch': np.arange(channel2),
+            'lat': self.coords['lat'],
+            'lon': self.coords['lon']
+        }
+        coords3 = {
+            'time': target_time,
+            'ch': np.arange(channel3),
+            'lat': self.coords['lat'],
+            'lon': self.coords['lon']
+        }
+        
+        # Create xarray Datasets
+        ds1 = xr.Dataset({
+            'data': (['time', 'ch', 'lat', 'lon'], y_hat1_np)
+        }, coords=coords1)
+        
+        ds2 = xr.Dataset({
+            'data': (['time', 'ch', 'lat', 'lon'], y_hat2_np)
+        }, coords=coords2)
+        
+        ds3 = xr.Dataset({
+            'data': (['time', 'ch', 'lat', 'lon'], y_hat3_np)
+        }, coords=coords3)
+        
+        # Add metadata
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for i, ds in enumerate([ds1, ds2, ds3], start=1):
+            ds.attrs['description'] = f'Best forecast prediction part {i} from manual gradient descent optimization'
+            ds.attrs['creation_date'] = timestamp
+            ds.attrs['best_loss'] = float(self.best_loss)
+            ds.attrs['learning_rate'] = self.learning_rate
+            ds.attrs['num_iterations'] = self.num_iterations
+            ds.attrs['sample_idx'] = self.sample_idx
+            ds.attrs['sequence_length'] = self.sequence_length
+            ds.attrs['forecast_horizon'] = self.forecast_horizon
+            ds['data'].attrs['long_name'] = f'Best forecast prediction part {i}'
+            ds['data'].attrs['units'] = 'model_units'
+        
+        # Save with compression
+        encoding = {'data': {'zlib': True, 'complevel': 4}}
+        
+        path1 = f"{output_dir}/best_forecast_1.nc"
+        path2 = f"{output_dir}/best_forecast_2.nc"
+        path3 = f"{output_dir}/best_forecast_3.nc"
+        
+        ds1.to_netcdf(path1, encoding=encoding)
+        ds2.to_netcdf(path2, encoding=encoding)
+        ds3.to_netcdf(path3, encoding=encoding)
+        
+        log.info(f"Saved best predictions (loss={self.best_loss:.6f}):")
+        log.info(f"  {path1} - shape {y_hat1_np.shape}")
+        log.info(f"  {path2} - shape {y_hat2_np.shape}")
+        log.info(f"  {path3} - shape {y_hat3_np.shape}")
+    
     def save_error_analysis(self, results: Dict, output_dir: str) -> None:
         """Save error analysis to JSON file."""
         import json
@@ -697,6 +803,7 @@ class ManualGradientDescent:
                 'sequence_length': self.sequence_length,
                 'forecast_horizon': self.forecast_horizon,
             },
+            'best_loss': float(self.best_loss),
             'initial_errors': results['initial_errors'],
             'final_errors': results['final_errors'],
             'loss_history': results['loss_history'],
@@ -831,6 +938,9 @@ def main():
     
     # Save optimized initial conditions
     optimizer.save_optimized_ic(args.output_dir)
+    
+    # Save best predictions
+    optimizer.save_best_predictions(args.output_dir)
     
     log.info("\n" + "=" * 60)
     log.info("Done!")
