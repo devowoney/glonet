@@ -191,7 +191,7 @@ def add_metadata(ds, date):
     return ds
 
 def aforecast(d, date, cycle : int):
-    from .utility import get_denormalizer1, get_normalizer1
+    from utility import get_denormalizer1, get_normalizer1
 
     denormalizer = get_denormalizer1(MODEL_LOCATION)
     normalizer = get_normalizer1(MODEL_LOCATION)
@@ -240,7 +240,7 @@ def aforecast(d, date, cycle : int):
     return datasets
 
 def aforecast2(d, date, cycle):
-    from .utility import get_denormalizer2, get_normalizer2
+    from utility import get_denormalizer2, get_normalizer2
 
     denormalizer = get_denormalizer2(MODEL_LOCATION)
     normalizer = get_normalizer2(MODEL_LOCATION)
@@ -291,7 +291,7 @@ def aforecast2(d, date, cycle):
 
 
 def aforecast3(d, date, cycle):
-    from .utility import get_denormalizer3, get_normalizer3
+    from utility import get_denormalizer3, get_normalizer3
 
     denormalizer = get_denormalizer3(MODEL_LOCATION)
     normalizer = get_normalizer3(MODEL_LOCATION)
@@ -344,24 +344,32 @@ def create_forecast(init_dir : Path,
                     forecast_cycle : int = None, 
                     output_path : Path = None) -> xr.Dataset :
     # Extract string date
-    init_date = str(init_dir).split("_init_", 1)[0].rsplit("/", 1)[1]
+    init_date_str = str(init_dir.parent).split("_init_", 1)[0].rsplit("/", 1)[1] if "_init_" in str(init_dir.parent) else None
     
-    # Detect wether the forecast is from GLORYS12 or GLONET forecast states.
-    if str(init_dir).split("_init_", 1)[1].split("_")[0] == "from" :
+    if init_date_str is None:
+        # If date is not in directory name, try to extract from filename
+        # This is a fallback - you may need to adjust based on your naming convention
+        init_date_str = datetime.now().strftime("%Y-%m-%d")
+        print(f"Warning: Could not extract date from path, using current date: {init_date_str}")
+    
+    # Detect whether the forecast is from GLORYS12 or GLONET forecast states.
+    if "_init_" in str(init_dir.parent) and str(init_dir.parent).split("_init_", 1)[1].split("_")[0] == "from" :
         is_from_glonet_out = True
     else :
         is_from_glonet_out = False
         
-    date = datetime.strptime(init_date, "%Y-%m-%d").date()
+    # date = datetime.strptime(init_date, "%Y-%m-%d").date()
+    rdata1 = xr.open_dataset(f"{init_dir}/input1.nc")
+    date = rdata1.time.data[1].astype("M8[D]").astype(datetime)
 
     start_datetime = str(date - timedelta(days=1))
-    end_datetime = str(date)
+    end_datetime = str(date + timedelta(days=forecast_cycle))
     print(
-        f"Creating {init_date} forecast from {start_datetime} to {end_datetime}..."
+        f"Creating {date} forecast from {start_datetime} to {end_datetime}..."
     )
 
     start_timed = time.time()
-    rdata1 = xr.open_dataset(f"{init_dir}/input1.nc")
+    # rdata1 = xr.open_dataset(f"{init_dir}/input1.nc")
     rdata2 = xr.open_dataset(f"{init_dir}/input2.nc")
     rdata3 = xr.open_dataset(f"{init_dir}/input3.nc")
     end_timed = time.time()
@@ -407,9 +415,9 @@ def create_forecast(init_dir : Path,
          
     os.makedirs(out_path, exist_ok=True)
     if not is_from_glonet_out :
-        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/forecast_{forecast_cycle}days_from_{date}.nc")
     else :
-        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{init_date}.nc")
+        combined4.to_netcdf(f"{out_path}/repeated_forecast_{forecast_cycle}days_from_{date}.nc")
         
     print(f"Forecast by GLONET completed : output saved in < {out_path} >")
     

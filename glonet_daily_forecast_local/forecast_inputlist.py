@@ -360,17 +360,19 @@ def create_forecast(rdata1_path : Path,
         is_from_glonet_out = True
     else :
         is_from_glonet_out = False
-        
-    date = datetime.strptime(init_date_str, "%Y-%m-%d").date()
-
+    
+    # date = datetime.strptime(init_date_str, "%Y-%m-%d").date()
+    rdata1 = xr.open_dataset(rdata1_path)
+    date = rdata1.time.data[1].astype("M8[D]").astype(datetime)
+    
     start_datetime = str(date - timedelta(days=1))
-    end_datetime = str(date + timedelta(days=7)) 
+    end_datetime = str(date + timedelta(days=forecast_cycle)) 
     print(
         f"Creating {init_date_str} forecast from {start_datetime} to {end_datetime}..."
     )
 
     start_timed = time.time()
-    rdata1 = xr.open_dataset(rdata1_path)
+    # rdata1 = xr.open_dataset(rdata1_path)
     rdata2 = xr.open_dataset(rdata2_path)
     rdata3 = xr.open_dataset(rdata3_path)
     end_timed = time.time()
