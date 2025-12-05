@@ -31,7 +31,7 @@ from optimIC_GD_glonetLit import GlonetGradientCheckpointing
 # Constants
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 now = datetime.now().strftime('%Y-%m-%d-%H%M%S')
-DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/training/outputs/man_optimIC_GD/{now}"
+DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/training/outputs/man_optimIC_GD/{now}_thetao"
 
 # Setup logging
 log = logging.getLogger(__name__)
@@ -217,22 +217,37 @@ class ManualGradientDescent:
         self.x0_2.requires_grad = False
         self.x0_3.requires_grad = False
         
-        self.x0_ssh = self.x0_1[:, :, 0:1, :, :].clone().detach()
-        self.x0_ssh.requires_grad = True
+        self.x0_1_t = self.x0_1[:, :, 1:2, :, :].clone().detach()
+        self.x0_2_t = self.x0_2[:, :, 0:10, :, :].clone().detach()
+        self.x0_3_t = self.x0_3[:, :, 0:10, :, :].clone().detach()
+        self.x0_1_t.requires_grad = True
+        self.x0_2_t.requires_grad = True
+        self.x0_3_t.requires_grad = True
 
-        self.x0_left = self.x0_1[:, :, 1:5, :, :].clone().detach()
-        self.x0_left.requires_grad = False
+        self.x0_1_left_1 = self.x0_1[:, :, 0:1, :, :].clone().detach()
+        self.x0_1_left_2 = self.x0_1[:, :, 2:5, :, :].clone().detach()
+        # self.x0_2_left_1 = self.x0_1[:, :, 2:5, :, :].clone().detach()
+        self.x0_2_left_2 = self.x0_2[:, :, 10:40, :, :].clone().detach()
+        # self.x0_3_left_1 = self.x0_1[:, :, 2:5, :, :].clone().detach()
+        self.x0_3_left_2 = self.x0_3[:, :, 10:40, :, :].clone().detach()
+        self.x0_1_left_1.requires_grad = False
+        self.x0_1_left_2.requires_grad = False
+        self.x0_2_left_2.requires_grad = False
+        self.x0_3_left_2.requires_grad = False
         
-
+        self.target_1_t = self.target1[:, 1:2, :, :]
+        self.target_2_t = self.target2[:, 0:10, :, :]
+        self.target_3_t = self.target3[:, 0:10, :, :]
         
-        self.target_ssh = self.target1[:, 0:1, :, :]  # Only SSH channel
-        
-        self.ocean_mask_1 = self.ocean_mask_1[0:1, :, :]  # Only SSH channel
+        self.ocean_mask_1_t = self.ocean_mask_1[1:2, :, :]  # Only SSH channel
+        self.ocean_mask_2_t = self.ocean_mask_2[0:10, :, :]
+        self.ocean_mask_3_t = self.ocean_mask_3[0:10, :, :]
         
         log.info(f"Loaded data shapes:")
-        log.info(f"  SSH : {self.x0_ssh.shape}, Target for SSH: {self.target_ssh.shape}")
-        log.info(f"  Input 1: {self.x0_1.shape}")
-        log.info(f"  Gradient tracking only for SSH")
+        log.info(f"  thetao (x_1): {self.x0_1.shape}, Target for thetao: {self.target_1_t.shape}")
+        log.info(f"  thetao (x_2): {self.x0_2.shape}, Target for thetao: {self.target_2_t.shape}")
+        log.info(f"  thetao (x_3): {self.x0_3.shape}, Target for thetao: {self.target_3_t.shape}")
+        log.info(f"  Gradient tracking only for thetao")
         # log.info(f"  Input 2: {self.x0_2.shape}, Target 2: {self.target2.shape}")
         # log.info(f"  Input 3: {self.x0_3.shape}, Target 3: {self.target3.shape}")
     
@@ -242,10 +257,12 @@ class ManualGradientDescent:
         with torch.enable_grad():
             # Normalize inputs (not targets - they stay in original space for loss calculation)
             # self.x0_1 = self.normalizer1(self.x0_1)
-            self.x0_combined_1 = torch.cat([self.x0_ssh, self.x0_left], dim=2) 
-            self.x1 = self.normalizer1(self.x0_combined_1)
-            self.x2 = self.normalizer2(self.x0_2)
-            self.x3 = self.normalizer3(self.x0_3)
+            self.x0_1_combined = torch.cat([self.x0_1_left_1, self.x0_1_t, self.x0_1_left_2], dim=2) 
+            self.x1 = self.normalizer1(self.x0_1_combined)
+            self.x0_2_combined = torch.cat([self.x0_2_t, self.x0_2_left_2], dim=2)
+            self.x2 = self.normalizer2(self.x0_2_combined)
+            self.x0_3_combined = torch.cat([self.x0_3_t, self.x0_3_left_2], dim=2)
+            self.x3 = self.normalizer3(self.x0_3_combined)
             
         # Forward pass
         with torch.enable_grad():
@@ -265,18 +282,20 @@ class ManualGradientDescent:
             y_hat2 = self.denormalizer2(y_hat2)
             y_hat3 = self.denormalizer3(y_hat3)
             
-            y_hat1 = y_hat1[:, 0:1, :, :]  # Retrive only SSH channel
-        
+            y_hat1 = y_hat1[:, 1:2, :, :]  # Retrive only thetao channel
+            y_hat2 = y_hat2[:, 0:10, :, :]
+            y_hat3 = y_hat3[:, 0:10, :, :]
+            
         return y_hat1, y_hat2, y_hat3
     
     def compute_loss(self, y_hat1: torch.Tensor, y_hat2: torch.Tensor, y_hat3: torch.Tensor) -> torch.Tensor:
         """Compute MSE loss between predictions and targets."""
         
-        loss1 = self.loss_fn(y_hat1, self.target_ssh)
-        loss2 = self.loss_fn(y_hat2, self.target2)
-        loss3 = self.loss_fn(y_hat3, self.target3)
+        loss1 = self.loss_fn(y_hat1, self.target_1_t)
+        loss2 = self.loss_fn(y_hat2, self.target_2_t)
+        loss3 = self.loss_fn(y_hat3, self.target_3_t)
         
-        total_loss = loss1 # + loss2 + loss3
+        total_loss = loss1 + loss2 + loss3
         return total_loss, loss1, loss2, loss3
 
     def compute_variable_errors(self, y_hat1: torch.Tensor, y_hat2: torch.Tensor, y_hat3: torch.Tensor) -> Dict:
@@ -284,40 +303,68 @@ class ManualGradientDescent:
         
         with torch.no_grad():
             # Concatenate all predictions and targets
-            y_hat_all = torch.cat([y_hat1], dim=1)  # [1, 85, H, W]
-            y_all = torch.cat([self.target1], dim=1)  # [1, 85, H, W]
+            y_hat_all = torch.cat([y_hat1, y_hat2, y_hat3], dim=1)  # [1, 21, H, W]
+            y_all = torch.cat([self.target_1_t, self.target_2_t, self.target_3_t], dim=1) # [1, 21, H, W]
             
             # Compute squared errors: (y - y_hat)^2
-            squared_errors = (y_all - y_hat_all) ** 2  # [1, 85, H, W]
+            squared_errors = (y_all - y_hat_all) ** 2 # [1, 21, H, W]
             
             # Compute variance of true values for normalization
-            y_variance = torch.var(y_all, dim=(2, 3), keepdim=True)  # [1, 85, 1, 1]
+            y_variance = torch.var(y_all, dim=(2, 3), keepdim=True) # [1, 21, H, W]
             
             # Apply ocean masks (combined for all parts)
-            ocean_mask_all = torch.cat([self.ocean_mask_1], dim=0).unsqueeze(0)      # [1, 85, H, W]
+            ocean_mask_all = torch.cat([self.ocean_mask_1_t, self.ocean_mask_2_t, self.ocean_mask_3_t], dim=0).unsqueeze(0)      
+            # [1, 21, H, W]
             
-            # Mask out land regions
+            # Mask out land region
             squared_errors_masked = squared_errors * ocean_mask_all
             
             # Count valid ocean points per channel
-            n_ocean_points = ocean_mask_all.sum(dim=(2, 3))  # [1, 85]
+            n_ocean_points = ocean_mask_all.sum(dim=(2, 3))  # [1, 21]
             
             # Compute mean squared error per channel
-            mse_per_channel = squared_errors_masked.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 85]
+            mse_per_channel = squared_errors_masked.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 21]
             
             # Compute normalized MSE (divide by variance)
-            normalized_mse_per_channel = mse_per_channel / (y_variance.squeeze(2).squeeze(2) + 1e-10)  # [1, 85]
+            normalized_mse_per_channel = mse_per_channel / (y_variance.squeeze(2).squeeze(2) + 1e-10)  # [1, 21]
             
             # Convert to numpy for easier indexing
-            mse_np = mse_per_channel.cpu().numpy().squeeze(0)  # [85]
-            norm_mse_np = normalized_mse_per_channel.cpu().numpy().squeeze(0)  # [85]
+            mse_np = mse_per_channel.cpu().numpy().squeeze(0)  # [21]
+            norm_mse_np = normalized_mse_per_channel.cpu().numpy().squeeze(0)  # [21]
             
             # Extract errors for specific variables
             errors = {
-                'SSH': {
-                    'channels': [0],
-                    'mse': float(mse_np[0]),
-                    'normalized_mse': float(norm_mse_np[0]),
+                'thetao': {
+                    'channels': {
+                        'surface': [1],
+                        'shallow': list(range(2, 11)), 
+                        'deep': list(range(11, 21)),   
+                    },
+                    'mse': {
+                        'surface': float(mse_np[1]),
+                        'shallow': mse_np[2:11].tolist(),
+                        'deep': mse_np[11:21].tolist(),
+                    },
+                    'normalized_mse': {
+                        'surface': float(norm_mse_np[1]),
+                        'shallow': norm_mse_np[2:11].tolist(),
+                        'deep': norm_mse_np[11:21].tolist(),
+                    },
+                    'mean_mse': {
+                        'surface': float(mse_np[1]),
+                        'shallow': float(mse_np[2:11].mean()),
+                        'deep': float(mse_np[11:21].mean()),
+                        'all': float(np.concatenate([mse_np[1:2], mse_np[2:11], mse_np[11:21]]).mean()),
+                    },
+                    'mean_normalized_mse': {
+                        'surface': float(norm_mse_np[1]),
+                        'shallow': float(norm_mse_np[2:11].mean()),
+                        'deep': float(norm_mse_np[11:21].mean()),
+                        'all': float(np.concatenate([norm_mse_np[1:2], norm_mse_np[2:11], norm_mse_np[11:21]]).mean()),
+                    },
+                    'rmse': {
+                        'all' : float(np.sqrt(mse_np).mean())
+                    }
                 },
                 
                 # Store full channel-wise errors for reference
@@ -333,16 +380,27 @@ class ManualGradientDescent:
         log.info("ERROR ANALYSIS BY VARIABLE")
         log.info("=" * 80)
         
-        # SSH
-        log.info("\n[SSH - Sea Surface Height] (ch=0)")
-        log.info(f"  MSE:            {errors['SSH']['mse']:.6e}")
-        log.info(f"  Normalized MSE: {errors['SSH']['normalized_mse']:.6f}")
-        log.info("\n" + "=" * 80)
+        # Temperature (thetao)
+        log.info("\n[THETAO - Temperature]")
+        log.info(f"  Surface (ch=1):")
+        log.info(f"    MSE:            {errors['thetao']['mean_mse']['surface']:.6e}")
+        log.info(f"    Normalized MSE: {errors['thetao']['mean_normalized_mse']['surface']:.6f}")
+        log.info(f"  Shallow (ch=2:11, 10 levels):")
+        log.info(f"    Mean MSE:            {errors['thetao']['mean_mse']['shallow']:.6e}")
+        log.info(f"    Mean Normalized MSE: {errors['thetao']['mean_normalized_mse']['shallow']:.6f}")
+        log.info(f"  Deep (ch=11:20, 10 levels):")
+        log.info(f"    Mean MSE:            {errors['thetao']['mean_mse']['deep']:.6e}")
+        log.info(f"    Mean Normalized MSE: {errors['thetao']['mean_normalized_mse']['deep']:.6f}")
+        log.info(f"  Overall Mean:")
+        log.info(f"    Mean MSE:            {errors['thetao']['mean_mse']['all']:.6e}")
+        log.info(f"    Mean Normalized MSE: {errors['thetao']['mean_normalized_mse']['all']:.6f} \n")
+
+
         
     def optimize(self) -> Dict:
         """Run manual gradient descent optimization."""
         log.info(f"\nStarting manual gradient descent optimization...")
-        log.info(f"[!!] Note: Only SSH variable in Input 1 is being optimized.")
+        log.info(f"[!!] Note: Only temperature variable in Input 1 is being optimized.")
         log.info(f"Learning rate: {self.learning_rate}")
         log.info(f"Number of iterations: {self.num_iterations}")
         log.info("=" * 60)
@@ -363,8 +421,14 @@ class ManualGradientDescent:
                 self.x0_2.grad.zero_()
             if self.x0_3.grad is not None:
                 self.x0_3.grad.zero_()
-            if self.x0_ssh.grad is not None:
-                self.x0_ssh.grad.zero_()
+                
+            if self.x0_1_t.grad is not None:
+                self.x0_1_t.grad.zero_()
+            if self.x0_2_t.grad is not None:
+                self.x0_2_t.grad.zero_()
+            if self.x0_3_t.grad is not None:
+                self.x0_3_t.grad.zero_()    
+            
             # Forward pass
             y_hat1, y_hat2, y_hat3 = self.forward()
             
@@ -382,8 +446,13 @@ class ManualGradientDescent:
                     self.x0_2.grad *= self.ocean_mask_2.unsqueeze(0).unsqueeze(0)
                 if self.x0_3.grad is not None:
                     self.x0_3.grad *= self.ocean_mask_3.unsqueeze(0).unsqueeze(0)
-                if self.x0_ssh.grad is not None:
-                    self.x0_ssh.grad *= self.ocean_mask_1.unsqueeze(0).unsqueeze(0) 
+                    
+                if self.x0_1_t.grad is not None:
+                    self.x0_1_t.grad *= self.ocean_mask_1_t.unsqueeze(0).unsqueeze(0)
+                if self.x0_2_t.grad is not None:
+                    self.x0_2_t.grad *= self.ocean_mask_2_t.unsqueeze(0).unsqueeze(0)
+                if self.x0_3_t.grad is not None:
+                    self.x0_3_t.grad *= self.ocean_mask_3_t.unsqueeze(0).unsqueeze(0)
                                
             # Manual gradient descent update
             with torch.no_grad():
@@ -393,8 +462,13 @@ class ManualGradientDescent:
                     self.x0_2 -= self.learning_rate * self.x0_2.grad
                 if self.x0_3.grad is not None:
                     self.x0_3 -= self.learning_rate * self.x0_3.grad
-                if self.x0_ssh.grad is not None:
-                    self.x0_ssh -= self.learning_rate * self.x0_ssh.grad
+                    
+                if self.x0_1_t.grad is not None:
+                    self.x0_1_t -= self.learning_rate * self.x0_1_t.grad
+                if self.x0_2_t.grad is not None:
+                    self.x0_2_t -= self.learning_rate * self.x0_2_t.grad
+                if self.x0_3_t.grad is not None:
+                    self.x0_3_t -= self.learning_rate * self.x0_3_t.grad
                     
             # Store loss
             loss_history.append(total_loss.item())
@@ -404,12 +478,14 @@ class ManualGradientDescent:
                 self.best_loss = total_loss.item()
                 with torch.no_grad():
                     self.best_y_hat1 = y_hat1.detach().clone()
-                    # self.best_y_hat2 = y_hat2.detach().clone()
-                    # self.best_y_hat3 = y_hat3.detach().clone()
+                    self.best_y_hat2 = y_hat2.detach().clone()
+                    self.best_y_hat3 = y_hat3.detach().clone()
             
             # Compute gradient norms
             grad_norm_1 = self.x0_1.grad.norm().item() if self.x0_1.grad is not None else 0.0
-            grad_norm_ssh = self.x0_ssh.grad.norm().item() if self.x0_ssh.grad is not None else 0.0
+            grad_norm_t_1 = self.x0_1_t.grad.norm().item() if self.x0_1_t.grad is not None else 0.0
+            grad_norm_t_2 = self.x0_2_t.grad.norm().item() if self.x0_2_t.grad is not None else 0.0
+            grad_norm_t_3 = self.x0_3_t.grad.norm().item() if self.x0_3_t.grad is not None else 0.0
             grad_norm_2 = self.x0_2.grad.norm().item() if self.x0_2.grad is not None else 0.0
             grad_norm_3 = self.x0_3.grad.norm().item() if self.x0_3.grad is not None else 0.0
             
@@ -418,8 +494,8 @@ class ManualGradientDescent:
                 log.info(f"Iteration {iteration + 1}/{self.num_iterations}")
                 log.info(f"  Total Loss: {total_loss.item():.6f}")
                 # log.info(f"  Grad Norms - Input1: {grad_norm_1:.6f}, Input2: {grad_norm_2:.6f}, Input3: {grad_norm_3:.6f}")
-                log.info(f"  Grad Norm - Input1: {grad_norm_1:.6f}, Grad Norm - SSH: {grad_norm_ssh:.6f}")
-                log.info(f"  Grad Norm - Input2: {grad_norm_2:.6f}, Grad Norm - Input3: {grad_norm_3:.6f}")
+                log.info(f"  Grad Norm - x0t1: {grad_norm_t_1:.6f}, Grad Norm - x0t2: {grad_norm_t_2:.6f},"
+                         f"Grad Norm - x0t3: {grad_norm_t_3:.6f}")
                 log.info("-" * 60)
             
             # Memory cleanup
@@ -453,9 +529,9 @@ class ManualGradientDescent:
         
         # Denormalize the optimized initial conditions
         with torch.no_grad():
-            opt_x0_1 = self.denormalizer1(self.x0_1.detach())
-            opt_x0_2 = self.denormalizer2(self.x0_2.detach())
-            opt_x0_3 = self.denormalizer3(self.x0_3.detach())
+            opt_x0_1 = self.x0_1_combined.clone().detach()
+            opt_x0_2 = self.x0_2_combined.clone().detach()
+            opt_x0_3 = self.x0_3_combined.clone().detach()  
         
         # Convert to numpy and remove batch dimension
         opt_x0_1_np = opt_x0_1.cpu().numpy().squeeze(0)  # [T, C, H, W]
