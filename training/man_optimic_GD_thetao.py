@@ -534,9 +534,13 @@ class ManualGradientDescent:
             opt_x0_3 = self.x0_3_combined.clone().detach()  
         
         # Convert to numpy and remove batch dimension
+        # Apply ocean mask to set land points to NaN
         opt_x0_1_np = opt_x0_1.cpu().numpy().squeeze(0)  # [T, C, H, W]
+        opt_x0_1_np[:, self.ocean_mask_1.cpu().numpy() == 0] = np.nan
         opt_x0_2_np = opt_x0_2.cpu().numpy().squeeze(0)
+        opt_x0_2_np[:, self.ocean_mask_2.cpu().numpy() == 0] = np.nan
         opt_x0_3_np = opt_x0_3.cpu().numpy().squeeze(0)
+        opt_x0_3_np[:, self.ocean_mask_3.cpu().numpy() == 0] = np.nan
         
         # Get dimensions
         time, channel1, height, width = opt_x0_1_np.shape

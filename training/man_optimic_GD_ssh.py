@@ -459,6 +459,7 @@ class ManualGradientDescent:
         
         # Convert to numpy and remove batch dimension
         opt_x0_1_np = opt_x0_1.cpu().numpy().squeeze(0)  # [T, C, H, W]
+        opt_x0_2_np[:, self.ocean_mask_1 == 0] = np.nan
         opt_x0_2_np = opt_x0_2.cpu().numpy().squeeze(0)
         opt_x0_3_np = opt_x0_3.cpu().numpy().squeeze(0)
         
