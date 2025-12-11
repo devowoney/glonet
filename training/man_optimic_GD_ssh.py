@@ -227,7 +227,7 @@ class ManualGradientDescent:
         
         self.target_ssh = self.target1[:, 0:1, :, :]  # Only SSH channel
         
-        self.ocean_mask_1 = self.ocean_mask_1[0:1, :, :]  # Only SSH channel
+        self.ocean_mask_ssh = self.ocean_mask_1[0:1, :, :]  # Only SSH channel
         
         log.info(f"Loaded data shapes:")
         log.info(f"  SSH : {self.x0_ssh.shape}, Target for SSH: {self.target_ssh.shape}")
@@ -285,7 +285,7 @@ class ManualGradientDescent:
         with torch.no_grad():
             # Concatenate all predictions and targets
             y_hat_all = torch.cat([y_hat1], dim=1)  # [1, 85, H, W]
-            y_all = torch.cat([self.target1], dim=1)  # [1, 85, H, W]
+            y_all = torch.cat([self.target_ssh], dim=1)  # [1, 85, H, W]
             
             # Compute squared errors: (y - y_hat)^2
             squared_errors = (y_all - y_hat_all) ** 2  # [1, 85, H, W]
@@ -294,7 +294,7 @@ class ManualGradientDescent:
             y_variance = torch.var(y_all, dim=(2, 3), keepdim=True)  # [1, 85, 1, 1]
             
             # Apply ocean masks (combined for all parts)
-            ocean_mask_all = torch.cat([self.ocean_mask_1], dim=0).unsqueeze(0)      # [1, 85, H, W]
+            ocean_mask_all = torch.cat([self.ocean_mask_ssh], dim=0).unsqueeze(0)      # [1, 85, H, W]
             
             # Mask out land regions
             squared_errors_masked = squared_errors * ocean_mask_all
@@ -306,7 +306,14 @@ class ManualGradientDescent:
             mse_per_channel = squared_errors_masked.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 85]
             
             # Compute normalized MSE (divide by variance)
-            normalized_mse_per_channel = mse_per_channel / (y_variance.squeeze(2).squeeze(2) + 1e-10)  # [1, 85]
+            masked_y = y_all * ocean_mask_all
+            mean_y = masked_y.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [B, 21]
+            mean_y_exp = mean_y.unsqueeze(-1).unsqueeze(-1)  # [B, 21, 1, 1]
+            sq_dev = ((y_all - mean_y_exp) ** 2) * ocean_mask_all
+            var_per_channel = sq_dev.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [B, 21]
+
+            # normalized MSE
+            normalized_mse_per_channel = mse_per_channel / (var_per_channel + 1e-10)  # [B, 21] 
             
             # Convert to numpy for easier indexing
             mse_np = mse_per_channel.cpu().numpy().squeeze(0)  # [85]
@@ -383,7 +390,7 @@ class ManualGradientDescent:
                 if self.x0_3.grad is not None:
                     self.x0_3.grad *= self.ocean_mask_3.unsqueeze(0).unsqueeze(0)
                 if self.x0_ssh.grad is not None:
-                    self.x0_ssh.grad *= self.ocean_mask_1.unsqueeze(0).unsqueeze(0) 
+                    self.x0_ssh.grad *= self.ocean_mask_ssh.unsqueeze(0).unsqueeze(0) 
                                
             # Manual gradient descent update
             with torch.no_grad():
@@ -459,9 +466,11 @@ class ManualGradientDescent:
         
         # Convert to numpy and remove batch dimension
         opt_x0_1_np = opt_x0_1.cpu().numpy().squeeze(0)  # [T, C, H, W]
-        opt_x0_2_np[:, self.ocean_mask_1 == 0] = np.nan
+        opt_x0_1_np[:, self.ocean_mask_1.cpu().numpy() == 0] = np.nan
         opt_x0_2_np = opt_x0_2.cpu().numpy().squeeze(0)
+        opt_x0_2_np[:, self.ocean_mask_2.cpu().numpy() == 0] = np.nan
         opt_x0_3_np = opt_x0_3.cpu().numpy().squeeze(0)
+        opt_x0_3_np[:, self.ocean_mask_3.cpu().numpy() == 0] = np.nan
         
         # Get dimensions
         time, channel1, height, width = opt_x0_1_np.shape

@@ -325,9 +325,21 @@ class ManualGradientDescent:
             # Compute mean squared error per channel
             mse_per_channel = squared_errors_masked.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 21]
             
-            # Compute normalized MSE (divide by variance)
-            normalized_mse_per_channel = mse_per_channel / (y_variance.squeeze(2).squeeze(2) + 1e-10)  # [1, 21]
-            
+            # compute variance of y over the same ocean points and same dims (spatial)
+            # use population variance (unbiased=False) to match MSE's 1/N scaling
+            # compute masked mean then masked var to ignore land
+            masked_y = y_all * ocean_mask_all
+            mean_y = masked_y.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 21]
+
+            # compute variance: E[(y - mean)^2] over ocean points
+            # expand mean to spatial dims for subtraction
+            mean_y_exp = mean_y.unsqueeze(-1).unsqueeze(-1)  # [1, 21, 1, 1]
+            sq_dev = ((y_all - mean_y_exp) ** 2) * ocean_mask_all
+            var_per_channel = sq_dev.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 21]
+
+            # normalized MSE
+            normalized_mse_per_channel = mse_per_channel / (var_per_channel + 1e-10)  # [1, 21]
+
             # Convert to numpy for easier indexing
             mse_np = mse_per_channel.cpu().numpy().squeeze(0)  # [21]
             norm_mse_np = normalized_mse_per_channel.cpu().numpy().squeeze(0)  # [21]
