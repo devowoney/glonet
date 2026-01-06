@@ -31,7 +31,7 @@ from optimIC_GD_glonetLit import GlonetGradientCheckpointing
 # Constants
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 now = datetime.now().strftime('%Y-%m-%d-%H%M%S')
-DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/training/outputs/man_optimIC_GD/{now}_thetao"
+DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/training/outputs/man_optimIC_GD/{now}_uo"
 
 # Setup logging
 log = logging.getLogger(__name__)
@@ -217,37 +217,39 @@ class ManualGradientDescent:
         self.x0_2.requires_grad = False
         self.x0_3.requires_grad = False
         
-        self.x0_1_t = self.x0_1[:, :, 1:2, :, :].clone().detach()
-        self.x0_2_t = self.x0_2[:, :, 0:10, :, :].clone().detach()
-        self.x0_3_t = self.x0_3[:, :, 0:10, :, :].clone().detach()
-        self.x0_1_t.requires_grad = True
-        self.x0_2_t.requires_grad = True
-        self.x0_3_t.requires_grad = True
+        self.x0_1_u = self.x0_1[:, :, 3:4, :, :].clone().detach()
+        self.x0_2_u = self.x0_2[:, :, 20:30, :, :].clone().detach()
+        self.x0_3_u = self.x0_3[:, :, 20:30, :, :].clone().detach()
+        self.x0_1_u.requires_grad = True
+        self.x0_2_u.requires_grad = True
+        self.x0_3_u.requires_grad = True
 
-        self.x0_1_left_1 = self.x0_1[:, :, 0:1, :, :].clone().detach()
-        self.x0_1_left_2 = self.x0_1[:, :, 2:5, :, :].clone().detach()
-        # self.x0_2_left_1 = self.x0_1[:, :, 2:5, :, :].clone().detach()
-        self.x0_2_left_2 = self.x0_2[:, :, 10:40, :, :].clone().detach()
-        # self.x0_3_left_1 = self.x0_1[:, :, 2:5, :, :].clone().detach()
-        self.x0_3_left_2 = self.x0_3[:, :, 10:40, :, :].clone().detach()
+        self.x0_1_left_1 = self.x0_1[:, :, 0:3, :, :].clone().detach()
+        self.x0_1_left_2 = self.x0_1[:, :, 4:5, :, :].clone().detach()
+        self.x0_2_left_1 = self.x0_2[:, :, 0:20, :, :].clone().detach()
+        self.x0_2_left_2 = self.x0_2[:, :, 30:40, :, :].clone().detach()
+        self.x0_3_left_1 = self.x0_3[:, :, 0:20, :, :].clone().detach()
+        self.x0_3_left_2 = self.x0_3[:, :, 30:40, :, :].clone().detach()
         self.x0_1_left_1.requires_grad = False
         self.x0_1_left_2.requires_grad = False
+        self.x0_2_left_1.requires_grad = False
         self.x0_2_left_2.requires_grad = False
+        self.x0_3_left_1.requires_grad = False
         self.x0_3_left_2.requires_grad = False
         
-        self.target_1_t = self.target1[:, 1:2, :, :]
-        self.target_2_t = self.target2[:, 0:10, :, :]
-        self.target_3_t = self.target3[:, 0:10, :, :]
+        self.target_1_u = self.target1[:, 3:4, :, :]
+        self.target_2_u = self.target2[:, 20:30, :, :]
+        self.target_3_u = self.target3[:, 20:30, :, :]
         
-        self.ocean_mask_1_t = self.ocean_mask_1[1:2, :, :]  # Only SSH channel
-        self.ocean_mask_2_t = self.ocean_mask_2[0:10, :, :]
-        self.ocean_mask_3_t = self.ocean_mask_3[0:10, :, :]
+        self.ocean_mask_1_u = self.ocean_mask_1[3:4, :, :]  # Only SSH channel
+        self.ocean_mask_2_u = self.ocean_mask_2[20:30, :, :]
+        self.ocean_mask_3_u = self.ocean_mask_3[20:30, :, :]
         
         log.info(f"Loaded data shapes:")
-        log.info(f"  thetao (x_1): {self.x0_1.shape}, Target for thetao: {self.target_1_t.shape}")
-        log.info(f"  thetao (x_2): {self.x0_2.shape}, Target for thetao: {self.target_2_t.shape}")
-        log.info(f"  thetao (x_3): {self.x0_3.shape}, Target for thetao: {self.target_3_t.shape}")
-        log.info(f"  Gradient tracking only for thetao")
+        log.info(f"  uo (x_1): {self.x0_1.shape}, Target for uo: {self.target_1_u.shape}")
+        log.info(f"  uo (x_2): {self.x0_2.shape}, Target for uo: {self.target_2_u.shape}")
+        log.info(f"  uo (x_3): {self.x0_3.shape}, Target for uo: {self.target_3_u.shape}")
+        log.info(f"  Gradient tracking only for uo")
         # log.info(f"  Input 2: {self.x0_2.shape}, Target 2: {self.target2.shape}")
         # log.info(f"  Input 3: {self.x0_3.shape}, Target 3: {self.target3.shape}")
     
@@ -257,11 +259,11 @@ class ManualGradientDescent:
         with torch.enable_grad():
             # Normalize inputs (not targets - they stay in original space for loss calculation)
             # self.x0_1 = self.normalizer1(self.x0_1)
-            self.x0_1_combined = torch.cat([self.x0_1_left_1, self.x0_1_t, self.x0_1_left_2], dim=2) 
+            self.x0_1_combined = torch.cat([self.x0_1_left_1, self.x0_1_u, self.x0_1_left_2], dim=2) 
             self.x1 = self.normalizer1(self.x0_1_combined)
-            self.x0_2_combined = torch.cat([self.x0_2_t, self.x0_2_left_2], dim=2)
+            self.x0_2_combined = torch.cat([self.x0_2_left_1, self.x0_2_u, self.x0_2_left_2], dim=2)
             self.x2 = self.normalizer2(self.x0_2_combined)
-            self.x0_3_combined = torch.cat([self.x0_3_t, self.x0_3_left_2], dim=2)
+            self.x0_3_combined = torch.cat([self.x0_3_left_1, self.x0_3_u, self.x0_3_left_2], dim=2)
             self.x3 = self.normalizer3(self.x0_3_combined)
             
         # Forward pass
@@ -282,18 +284,18 @@ class ManualGradientDescent:
             y_hat2 = self.denormalizer2(y_hat2)
             y_hat3 = self.denormalizer3(y_hat3)
             
-            y_hat1 = y_hat1[:, 1:2, :, :]  # Retrive only thetao channel
-            y_hat2 = y_hat2[:, 0:10, :, :]
-            y_hat3 = y_hat3[:, 0:10, :, :]
+            y_hat1 = y_hat1[:, 3:4, :, :]  # Retrive only thetao channel
+            y_hat2 = y_hat2[:, 20:30, :, :]
+            y_hat3 = y_hat3[:, 20:30, :, :]
             
         return y_hat1, y_hat2, y_hat3
     
     def compute_loss(self, y_hat1: torch.Tensor, y_hat2: torch.Tensor, y_hat3: torch.Tensor) -> torch.Tensor:
         """Compute MSE loss between predictions and targets."""
         
-        loss1 = self.loss_fn(y_hat1, self.target_1_t)
-        loss2 = self.loss_fn(y_hat2, self.target_2_t)
-        loss3 = self.loss_fn(y_hat3, self.target_3_t)
+        loss1 = self.loss_fn(y_hat1, self.target_1_u)
+        loss2 = self.loss_fn(y_hat2, self.target_2_u)
+        loss3 = self.loss_fn(y_hat3, self.target_3_u)
         
         total_loss = loss1 + loss2 + loss3
         return total_loss, loss1, loss2, loss3
@@ -304,7 +306,7 @@ class ManualGradientDescent:
         with torch.no_grad():
             # Concatenate all predictions and targets
             y_hat_all = torch.cat([y_hat1, y_hat2, y_hat3], dim=1)  # [1, 21, H, W]
-            y_all = torch.cat([self.target_1_t, self.target_2_t, self.target_3_t], dim=1) # [1, 21, H, W]
+            y_all = torch.cat([self.target_1_u, self.target_2_u, self.target_3_u], dim=1) # [1, 21, H, W]
             
             # Compute squared errors: (y - y_hat)^2
             squared_errors = (y_all - y_hat_all) ** 2 # [1, 21, H, W]
@@ -313,7 +315,7 @@ class ManualGradientDescent:
             y_variance = torch.var(y_all, dim=(2, 3), keepdim=True) # [1, 21, H, W]
             
             # Apply ocean masks (combined for all parts)
-            ocean_mask_all = torch.cat([self.ocean_mask_1_t, self.ocean_mask_2_t, self.ocean_mask_3_t], dim=0).unsqueeze(0)      
+            ocean_mask_all = torch.cat([self.ocean_mask_1_u, self.ocean_mask_2_u, self.ocean_mask_3_u], dim=0).unsqueeze(0)      
             # [1, 21, H, W]
             
             # Mask out land region
@@ -346,7 +348,7 @@ class ManualGradientDescent:
             
             # Extract errors for specific variables
             errors = {
-                'thetao': {
+                'uo': {
                     'channels': {
                         'surface': [0],
                         'shallow': list(range(1, 10)), 
@@ -392,27 +394,27 @@ class ManualGradientDescent:
         log.info("ERROR ANALYSIS BY VARIABLE")
         log.info("=" * 80)
         
-        # Temperature (thetao)
-        log.info("\n[THETAO - Temperature]")
+        # Current (uo)
+        log.info("\n[uo - Current (Zonal Velocity)]")
         log.info(f"  Surface (ch=1):")
-        log.info(f"    MSE:            {errors['thetao']['mean_mse']['surface']:.6e}")
-        log.info(f"    Normalized MSE: {errors['thetao']['mean_normalized_mse']['surface']:.6f}")
+        log.info(f"    MSE:            {errors['uo']['mean_mse']['surface']:.6e}")
+        log.info(f"    Normalized MSE: {errors['uo']['mean_normalized_mse']['surface']:.6f}")
         log.info(f"  Shallow (ch=2:11, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['thetao']['mean_mse']['shallow']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['thetao']['mean_normalized_mse']['shallow']:.6f}")
+        log.info(f"    Mean MSE:            {errors['uo']['mean_mse']['shallow']:.6e}")
+        log.info(f"    Mean Normalized MSE: {errors['uo']['mean_normalized_mse']['shallow']:.6f}")
         log.info(f"  Deep (ch=11:20, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['thetao']['mean_mse']['deep']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['thetao']['mean_normalized_mse']['deep']:.6f}")
+        log.info(f"    Mean MSE:            {errors['uo']['mean_mse']['deep']:.6e}")
+        log.info(f"    Mean Normalized MSE: {errors['uo']['mean_normalized_mse']['deep']:.6f}")
         log.info(f"  Overall Mean:")
-        log.info(f"    Mean MSE:            {errors['thetao']['mean_mse']['all']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['thetao']['mean_normalized_mse']['all']:.6f} \n")
+        log.info(f"    Mean MSE:            {errors['uo']['mean_mse']['all']:.6e}")
+        log.info(f"    Mean Normalized MSE: {errors['uo']['mean_normalized_mse']['all']:.6f} \n")
 
 
         
     def optimize(self) -> Dict:
         """Run manual gradient descent optimization."""
         log.info(f"\nStarting manual gradient descent optimization...")
-        log.info(f"[!!] Note: Only temperature variable in Input 1 is being optimized.")
+        log.info(f"[!!] Note: Only salinity variable in Input 1 is being optimized.")
         log.info(f"Learning rate: {self.learning_rate}")
         log.info(f"Number of iterations: {self.num_iterations}")
         log.info("=" * 60)
@@ -434,12 +436,12 @@ class ManualGradientDescent:
             if self.x0_3.grad is not None:
                 self.x0_3.grad.zero_()
                 
-            if self.x0_1_t.grad is not None:
-                self.x0_1_t.grad.zero_()
-            if self.x0_2_t.grad is not None:
-                self.x0_2_t.grad.zero_()
-            if self.x0_3_t.grad is not None:
-                self.x0_3_t.grad.zero_()    
+            if self.x0_1_u.grad is not None:
+                self.x0_1_u.grad.zero_()
+            if self.x0_2_u.grad is not None:
+                self.x0_2_u.grad.zero_()
+            if self.x0_3_u.grad is not None:
+                self.x0_3_u.grad.zero_()    
             
             # Forward pass
             y_hat1, y_hat2, y_hat3 = self.forward()
@@ -459,12 +461,12 @@ class ManualGradientDescent:
                 if self.x0_3.grad is not None:
                     self.x0_3.grad *= self.ocean_mask_3.unsqueeze(0).unsqueeze(0)
                     
-                if self.x0_1_t.grad is not None:
-                    self.x0_1_t.grad *= self.ocean_mask_1_t.unsqueeze(0).unsqueeze(0)
-                if self.x0_2_t.grad is not None:
-                    self.x0_2_t.grad *= self.ocean_mask_2_t.unsqueeze(0).unsqueeze(0)
-                if self.x0_3_t.grad is not None:
-                    self.x0_3_t.grad *= self.ocean_mask_3_t.unsqueeze(0).unsqueeze(0)
+                if self.x0_1_u.grad is not None:
+                    self.x0_1_u.grad *= self.ocean_mask_1_u.unsqueeze(0).unsqueeze(0)
+                if self.x0_2_u.grad is not None:
+                    self.x0_2_u.grad *= self.ocean_mask_2_u.unsqueeze(0).unsqueeze(0)
+                if self.x0_3_u.grad is not None:
+                    self.x0_3_u.grad *= self.ocean_mask_3_u.unsqueeze(0).unsqueeze(0)
                                
             # Manual gradient descent update
             with torch.no_grad():
@@ -475,12 +477,12 @@ class ManualGradientDescent:
                 if self.x0_3.grad is not None:
                     self.x0_3 -= self.learning_rate * self.x0_3.grad
                     
-                if self.x0_1_t.grad is not None:
-                    self.x0_1_t -= self.learning_rate * self.x0_1_t.grad
-                if self.x0_2_t.grad is not None:
-                    self.x0_2_t -= self.learning_rate * self.x0_2_t.grad
-                if self.x0_3_t.grad is not None:
-                    self.x0_3_t -= self.learning_rate * self.x0_3_t.grad
+                if self.x0_1_u.grad is not None:
+                    self.x0_1_u -= self.learning_rate * self.x0_1_u.grad
+                if self.x0_2_u.grad is not None:
+                    self.x0_2_u -= self.learning_rate * self.x0_2_u.grad
+                if self.x0_3_u.grad is not None:
+                    self.x0_3_u -= self.learning_rate * self.x0_3_u.grad
                     
             # Store loss
             loss_history.append(total_loss.item())
@@ -495,19 +497,19 @@ class ManualGradientDescent:
             
             # Compute gradient norms
             grad_norm_1 = self.x0_1.grad.norm().item() if self.x0_1.grad is not None else 0.0
-            grad_norm_t_1 = self.x0_1_t.grad.norm().item() if self.x0_1_t.grad is not None else 0.0
-            grad_norm_t_2 = self.x0_2_t.grad.norm().item() if self.x0_2_t.grad is not None else 0.0
-            grad_norm_t_3 = self.x0_3_t.grad.norm().item() if self.x0_3_t.grad is not None else 0.0
             grad_norm_2 = self.x0_2.grad.norm().item() if self.x0_2.grad is not None else 0.0
             grad_norm_3 = self.x0_3.grad.norm().item() if self.x0_3.grad is not None else 0.0
+            grad_norm_u_1 = self.x0_1_u.grad.norm().item() if self.x0_1_u.grad is not None else 0.0
+            grad_norm_u_2 = self.x0_2_u.grad.norm().item() if self.x0_2_u.grad is not None else 0.0
+            grad_norm_u_3 = self.x0_3_u.grad.norm().item() if self.x0_3_u.grad is not None else 0.0
             
             # Print progress
             if (iteration + 1) % 10 == 0 or iteration == 0:
                 log.info(f"Iteration {iteration + 1}/{self.num_iterations}")
                 log.info(f"  Total Loss: {total_loss.item():.6f}")
                 # log.info(f"  Grad Norms - Input1: {grad_norm_1:.6f}, Input2: {grad_norm_2:.6f}, Input3: {grad_norm_3:.6f}")
-                log.info(f"  Grad Norm - x0t1: {grad_norm_t_1:.6f}, Grad Norm - x0t2: {grad_norm_t_2:.6f},"
-                         f"Grad Norm - x0t3: {grad_norm_t_3:.6f}")
+                log.info(f"  Grad Norm - x0u1: {grad_norm_u_1:.6f}, Grad Norm - x0u2: {grad_norm_u_2:.6f},"
+                         f"Grad Norm - x0u3: {grad_norm_u_3:.6f}")
                 log.info("-" * 60)
             
             # Memory cleanup
