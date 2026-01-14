@@ -11,6 +11,7 @@ import argparse
 from pathlib import Path
 from typing import Union, List, Optional
 import glob
+import logging
 
 # Add current directory to path first to import local utility.py
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +21,15 @@ sys.path.insert(1, '/Odyssey/private/j25lee/glonet/src/glonet')
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 INPUT_LOCATION = "/Odyssey/public/glonet"
 user = os.environ.get("USER")
-DEFAULT_OUTPUT_LOCATION = f"/Odyssey/private/{user}/glonet/ensemble_output"
+DEFAULT_OUTPUT_LOCATION = f"/Odyssey/private/{user}/glonet/output"
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 
 #####
@@ -51,7 +60,7 @@ def setup_slurm_task():
         # Set GPU device for this task
         torch.cuda.set_device(local_rank)
         
-        print(f"[Task {rank}/{world_size}] Using GPU {local_rank}")
+        logger.info(f"[Task {rank}/{world_size}] Using GPU {local_rank}")
         
         return rank, world_size, local_rank
     else:
@@ -559,7 +568,7 @@ def create_forecast_batch(member_files: List[Path],
     
     batch_size = len(member_files)
     
-    print(f"[Task {rank}, GPU {device}] Processing batch of {batch_size} members...")
+    logger.info(f"[Task {rank}, GPU {device}] Processing batch of {batch_size} members...")
     
     # Load batch data
     batch_dataset, dates, member_names = load_batch_data(member_files)
@@ -567,7 +576,7 @@ def create_forecast_batch(member_files: List[Path],
     start_datetime = str(dates[0] - timedelta(days=1))
     end_datetime = str(dates[0] + timedelta(days=forecast_cycle))
     
-    print(f"[Task {rank}, GPU {device}] Creating forecasts from {start_datetime} to {end_datetime}...")
+    logger.info(f"[Task {rank}, GPU {device}] Creating forecasts from {start_datetime} to {end_datetime}...")
 
     start_time = time.time()
     
@@ -592,7 +601,7 @@ def create_forecast_batch(member_files: List[Path],
     end_time = time.time()
     execution_time = end_time - start_time
     
-    print(f"[Task {rank}, GPU {device}] Batch forecast time: {execution_time:.4f} seconds ({execution_time/batch_size:.2f}s per member)")
+    logger.info(f"[Task {rank}, GPU {device}] Batch forecast time: {execution_time:.4f} seconds ({execution_time/batch_size:.2f}s per member)")
     
     # Process each member in the batch
     results = []
@@ -615,7 +624,7 @@ def create_forecast_batch(member_files: List[Path],
         output_file = os.path.join(output_path, f"{member_names[b]}_forecast_{forecast_cycle}days.nc")
         combined4.to_netcdf(output_file)
         
-        print(f"[Task {rank}, GPU {device}] Saved: {member_names[b]}")
+        logger.info(f"[Task {rank}, GPU {device}] Saved: {member_names[b]}")
         
         results.append(combined4)
         
@@ -638,7 +647,7 @@ def create_forecast(rdata_path: Path,
     # Extract member info
     member_name = rdata_path.stem  # e.g., member_000_initial_condition
     
-    print(f"[Task {rank}, GPU {device}] Processing {member_name}...")
+    logger.info(f"[Task {rank}, GPU {device}] Processing {member_name}...")
     
     # Load data
     rdata = xr.open_dataset(rdata_path)
@@ -647,7 +656,7 @@ def create_forecast(rdata_path: Path,
     start_datetime = str(date - timedelta(days=1))
     end_datetime = str(date + timedelta(days=forecast_cycle))
     
-    print(f"[Task {rank}, GPU {device}] Creating forecast from {start_datetime} to {end_datetime}...")
+    logger.info(f"[Task {rank}, GPU {device}] Creating forecast from {start_datetime} to {end_datetime}...")
 
     start_time = time.time()
     
@@ -672,7 +681,7 @@ def create_forecast(rdata_path: Path,
     end_time = time.time()
     execution_time = end_time - start_time
     
-    print(f"[Task {rank}, GPU {device}] Forecast time: {execution_time:.4f} seconds")
+    logger.info(f"[Task {rank}, GPU {device}] Forecast time: {execution_time:.4f} seconds")
     
     # Combine results
     combined1 = xr.concat(ds1, dim="time")
@@ -696,7 +705,7 @@ def create_forecast(rdata_path: Path,
     output_file = os.path.join(output_path, f"{member_name}_forecast_{forecast_cycle}days.nc")
     combined4.to_netcdf(output_file)
     
-    print(f"[Task {rank}, GPU {device}] Forecast completed: {output_file}")
+    logger.info(f"[Task {rank}, GPU {device}] Forecast completed: {output_file}")
     
     return combined4
 
@@ -777,27 +786,27 @@ def main():
         rank, world_size, local_rank = setup_slurm_task()
         device = torch.device(f"cuda:{local_rank}")
     except Exception as e:
-        print(f"Error: Could not setup GPU: {e}")
-        print("Falling back to single GPU mode...")
+        logger.error(f"Error: Could not setup GPU: {e}")
+        logger.info("Falling back to single GPU mode...")
         rank, world_size, local_rank = 0, 1, 0
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
     if rank == 0:
-        print(f"\n{'='*60}")
-        print(f"GLONET Ensemble Forecast - Task-Based Parallel Computing")
-        print(f"{'='*60}")
-        print(f"Total tasks/GPUs: {world_size}")
-        print(f"Ensemble directory: {args.ensemble_dir}")
-        print(f"Ensemble type: {args.ensemble_type}")
-        print(f"Forecast cycle: {args.forecast_cycle} days")
-        print(f"Batch size per GPU: {args.batch_size} members")
-        print(f"{'='*60}\n")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"GLONET Ensemble Forecast - Task-Based Parallel Computing")
+        logger.info(f"{'='*60}")
+        logger.info(f"Total tasks/GPUs: {world_size}")
+        logger.info(f"Ensemble directory: {args.ensemble_dir}")
+        logger.info(f"Ensemble type: {args.ensemble_type}")
+        logger.info(f"Forecast cycle: {args.forecast_cycle} days")
+        logger.info(f"Batch size per GPU: {args.batch_size} members")
+        logger.info(f"{'='*60}\n")
     
     # Get ensemble files
     member_files = get_ensemble_files(args.ensemble_dir, args.ensemble_type)
     
     if rank == 0:
-        print(f"Found {len(member_files)} ensemble members")
+        logger.info(f"Found {len(member_files)} ensemble members")
     
     # Distribute members across GPUs
     members_per_gpu = args.members_per_gpu if args.members_per_gpu else len(member_files) // world_size + 1
@@ -806,7 +815,7 @@ def main():
     
     my_members = member_files[start_idx:end_idx]
     
-    print(f"[Task {rank}] Assigned {len(my_members)} members (indices {start_idx} to {end_idx-1})")
+    logger.info(f"[Task {rank}] Assigned {len(my_members)} members (indices {start_idx} to {end_idx-1})")
     
     # Set output directory
     if args.output:
@@ -823,7 +832,7 @@ def main():
         batch_end = min(batch_start + batch_size, len(my_members))
         batch_members = my_members[batch_start:batch_end]
         
-        print(f"\n[Task {rank}] Processing batch {batch_idx + 1}/{num_batches} ({len(batch_members)} members)")
+        logger.info(f"\n[Task {rank}] Processing batch {batch_idx + 1}/{num_batches} ({len(batch_members)} members)")
         
         try:
             create_forecast_batch(
@@ -834,11 +843,11 @@ def main():
                 rank=rank
             )
         except Exception as e:
-            print(f"[GPU {rank}] Error processing batch {batch_idx + 1}: {e}")
+            logger.error(f"[GPU {rank}] Error processing batch {batch_idx + 1}: {e}")
             import traceback
             traceback.print_exc()
             # Try processing members individually as fallback
-            print(f"[GPU {rank}] Falling back to individual processing for this batch...")
+            logger.info(f"[GPU {rank}] Falling back to individual processing for this batch...")
             for member_file in batch_members:
                 try:
                     create_forecast(
@@ -849,7 +858,7 @@ def main():
                         rank=rank
                     )
                 except Exception as e2:
-                    print(f"[GPU {rank}] Error processing {member_file.name}: {e2}")
+                    logger.error(f"[GPU {rank}] Error processing {member_file.name}: {e2}")
                     continue
         
         # Clear cache between batches
@@ -857,13 +866,13 @@ def main():
         gc.collect()
     
     # Final status
-    print(f"[Task {rank}] Completed all assigned batches")
+    logger.info(f"[Task {rank}] Completed all assigned batches")
     
     if rank == 0:
-        print(f"\n{'='*60}")
-        print(f"All ensemble forecasts completed!")
-        print(f"Output saved in: {output_dir}")
-        print(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"All ensemble forecasts completed!")
+        logger.info(f"Output saved in: {output_dir}")
+        logger.info(f"{'='*60}")
 
 
 if __name__ == "__main__":
