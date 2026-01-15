@@ -17,6 +17,7 @@ from typing import Tuple, Dict
 import gc
 import logging
 from datetime import datetime
+from torch.utils.tensorboard import SummaryWriter
 
 # Add path to glonet modules
 sys.path.append(str(Path(__file__).parent.parent / "glonet_daily_forecast_local"))
@@ -31,7 +32,7 @@ from optimIC_GD_glonetLit import GlonetGradientCheckpointing
 # Constants
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 now = datetime.now().strftime('%Y-%m-%d-%H%M%S')
-DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/training/outputs/man_optimIC_GD/{now}_ssh"
+DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/gradient_descent_optimic/outputs/man_optimIC_GD/{now}_ssh"
 
 # Setup logging
 log = logging.getLogger(__name__)
@@ -50,7 +51,8 @@ class ManualGradientDescent:
                  sample_idx: int = 0,
                  sequence_length: int = 2,
                  forecast_horizon: int = 7,
-                 device: str = "cuda:0"):
+                 device: str = "cuda:0",
+                 tensorboard_dir: str = None):
         
         self.data_path = data_path
         self.model_location = model_location
@@ -62,6 +64,12 @@ class ManualGradientDescent:
         self.sequence_length = sequence_length
         self.forecast_horizon = forecast_horizon
         self.device = device
+        
+        # Initialize TensorBoard writer
+        self.writer = None
+        if tensorboard_dir:
+            self.writer = SummaryWriter(log_dir=tensorboard_dir)
+            log.info(f"TensorBoard logging enabled: {tensorboard_dir}")
         
         # Initialize normalizers and denormalizers
         log.info("Loading normalizers and denormalizers...")
@@ -113,6 +121,11 @@ class ManualGradientDescent:
         self.best_y_hat1 = None
         self.best_y_hat2 = None
         self.best_y_hat3 = None
+        
+    def __del__(self):
+        """Clean up TensorBoard writer."""
+        if self.writer is not None:
+            self.writer.close()
         
     def _load_checkpoint_model(self, checkpoint_path: str, shape_in: Tuple[int, int, int, int]) -> torch.nn.Module:
         """Load a checkpoint-based model with gradient checkpointing."""
@@ -218,6 +231,7 @@ class ManualGradientDescent:
         self.x0_3.requires_grad = False
         
         self.x0_ssh = self.x0_1[:, :, 0:1, :, :].clone().detach()
+        self.x0_ssh_ref = self.x0_ssh.clone().detach()
         self.x0_ssh.requires_grad = True
 
         self.x0_left = self.x0_1[:, :, 1:5, :, :].clone().detach()
@@ -284,52 +298,81 @@ class ManualGradientDescent:
         
         with torch.no_grad():
             # Concatenate all predictions and targets
-            y_hat_all = torch.cat([y_hat1], dim=1)  # [1, 85, H, W]
-            y_all = torch.cat([self.target_ssh], dim=1)  # [1, 85, H, W]
+            y_hat_all = torch.cat([y_hat1], dim=1)  # [B, 1, H, W]
+            y_all = torch.cat([self.target_ssh], dim=1)  # [B, 1, H, W]
             
             # Compute squared errors: (y - y_hat)^2
-            squared_errors = (y_all - y_hat_all) ** 2  # [1, 85, H, W]
+            squared_errors = (y_all - y_hat_all) ** 2  # [B, 1, H, W]
             
             # Compute variance of true values for normalization
-            y_variance = torch.var(y_all, dim=(2, 3), keepdim=True)  # [1, 85, 1, 1]
+            y_variance = torch.var(y_all, dim=(2, 3), keepdim=True)  # [1, 1, 1, 1]
             
             # Apply ocean masks (combined for all parts)
-            ocean_mask_all = torch.cat([self.ocean_mask_ssh], dim=0).unsqueeze(0)      # [1, 85, H, W]
+            ocean_mask_all = torch.cat([self.ocean_mask_ssh], dim=0).unsqueeze(0)      # [B, 1, H, W]
             
             # Mask out land regions
             squared_errors_masked = squared_errors * ocean_mask_all
             
             # Count valid ocean points per channel
-            n_ocean_points = ocean_mask_all.sum(dim=(2, 3))  # [1, 85]
+            n_ocean_points = ocean_mask_all.sum(dim=(2, 3))  # [B, 1]
             
             # Compute mean squared error per channel
-            mse_per_channel = squared_errors_masked.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 85]
+            mse_per_channel = squared_errors_masked.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [B, 1]
             
-            # Compute normalized MSE (divide by variance)
-            masked_y = y_all * ocean_mask_all
-            mean_y = masked_y.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [B, 21]
-            mean_y_exp = mean_y.unsqueeze(-1).unsqueeze(-1)  # [B, 21, 1, 1]
-            sq_dev = ((y_all - mean_y_exp) ** 2) * ocean_mask_all
-            var_per_channel = sq_dev.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [B, 21]
+            # Compute RMSE per channel
+            rmse_per_channel = torch.sqrt(mse_per_channel)  # [1, 1]
+            
+            # Compute normalized RMSE (divide by variance)
+            # Compute variance manually
+            masked_y = y_all * ocean_mask_all # [1, 1, H, W]
+            mean_y = masked_y.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 1]
+            mean_y_exp = mean_y.unsqueeze(-1).unsqueeze(-1)  # [1, 1, 1, 1]
+            variance_y = ((y_all - mean_y_exp) ** 2) * ocean_mask_all
+            var_per_channel = variance_y.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 1]
 
-            # normalized MSE
-            normalized_mse_per_channel = mse_per_channel / (var_per_channel + 1e-10)  # [B, 21] 
+            # normalized RMSE
+            normalized_rmse_per_channel = rmse_per_channel / (torch.sqrt(var_per_channel) + 1e-10)  # [1, 1] 
             
             # Convert to numpy for easier indexing
-            mse_np = mse_per_channel.cpu().numpy().squeeze(0)  # [85]
-            norm_mse_np = normalized_mse_per_channel.cpu().numpy().squeeze(0)  # [85]
+            rmse_np = rmse_per_channel.cpu().numpy().squeeze(0)  # [1]
+            norm_rmse_np = normalized_rmse_per_channel.cpu().numpy().squeeze(0)  # [1]
+            
+            # Compute RMSE for initial conditions as reference
+            ic_ssh_ref_last = self.x0_ssh_ref[:, -1, :, :, :]  # [1, 1, H, W]
+            ic_ssh_last = self.x0_ssh[:, -1, :, :, :]  # [1, 1, H, W]
+            ic_squared_errors = (ic_ssh_ref_last - ic_ssh_last) ** 2  # [1, 1, H, W]
+            ic_squared_errors_masked = ic_squared_errors * ocean_mask_all
+            ic_mse_per_channel = ic_squared_errors_masked.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 1]
+            ic_rmse_per_channel = torch.sqrt(ic_mse_per_channel)  # [1, 1]
+            
+            ic_variance = torch.var(ic_ssh_ref_last, dim=(2, 3), keepdim=True)
+            ic_normalized_rmse_per_channel = ic_rmse_per_channel / torch.sqrt(ic_variance + 1e-10)  # [1, 1]
+            
+            ic_rmse_np = ic_rmse_per_channel.cpu().numpy().squeeze(0)  # [1]
+            ic_normalized_rmse_np = ic_normalized_rmse_per_channel.cpu().numpy().squeeze(0)  # [1]
             
             # Extract errors for specific variables
             errors = {
-                'SSH': {
-                    'channels': [0],
-                    'mse': float(mse_np[0]),
-                    'normalized_mse': float(norm_mse_np[0]),
+                'Prediction': {
+                    'SSH': {
+                        'channels': [0],
+                        'rmse': float(rmse_np[0]),
+                        'normalized_rmse': float(norm_rmse_np[0]),                        
+                    }
+
                 },
-                
+                'Initial Conditions': {
+                    'SSH': {
+                        'channels': [0],
+                        'rmse': float(ic_rmse_np[0]),
+                        'normalized_rmse': float(ic_normalized_rmse_np[0]),
+                    }
+                },
                 # Store full channel-wise errors for reference
-                'all_channels_mse': mse_np.tolist(),
-                'all_channels_normalized_mse': norm_mse_np.tolist(),
+                'all_channels_rmse': rmse_np.tolist(),
+                'all_channels_normalized_rmse': norm_rmse_np.tolist(),
+                'ic_all_channels_rmse': ic_rmse_np.tolist(),
+                'ic_all_channels_normalized_rmse': ic_normalized_rmse_np.tolist(),
             }
             
             return errors
@@ -342,8 +385,10 @@ class ManualGradientDescent:
         
         # SSH
         log.info("\n[SSH - Sea Surface Height] (ch=0)")
-        log.info(f"  MSE:            {errors['SSH']['mse']:.6e}")
-        log.info(f"  Normalized MSE: {errors['SSH']['normalized_mse']:.6f}")
+        log.info(f"  MSE:            {errors['Prediction']['SSH']['rmse']:.6e}")
+        log.info(f"  Normalized MSE: {errors['Prediction']['SSH']['normalized_rmse']:.6f}")
+        log.info(f"  IC MSE:         {errors['Initial Conditions']['SSH']['rmse']:.6e}")
+        log.info(f"  IC Normalized MSE: {errors['Initial Conditions']['SSH']['normalized_rmse']:.6f}")
         log.info("\n" + "=" * 80)
         
     def optimize(self) -> Dict:
@@ -414,6 +459,19 @@ class ManualGradientDescent:
                     self.best_y_hat2 = y_hat2.detach().clone()
                     self.best_y_hat3 = y_hat3.detach().clone()
             
+            # Compute error metrics for TensorBoard logging
+            iteration_errors = self.compute_variable_errors(y_hat1, y_hat2, y_hat3)
+            pred_rmse = iteration_errors['Prediction']['SSH']['rmse']
+            ic_rmse = iteration_errors['Initial Conditions']['SSH']['rmse']
+            
+            # Log to TensorBoard
+            if self.writer is not None:
+                self.writer.add_scalar('Loss/total_loss', total_loss.item(), iteration)
+                self.writer.add_scalar('RMSE/prediction', pred_rmse, iteration)
+                self.writer.add_scalar('RMSE/initial_condition', ic_rmse, iteration)
+                self.writer.add_scalar('RMSE/normalized_prediction', iteration_errors['Prediction']['SSH']['normalized_rmse'], iteration)
+                self.writer.add_scalar('RMSE/normalized_initial_condition', iteration_errors['Initial Conditions']['SSH']['normalized_rmse'], iteration)
+            
             # Compute gradient norms
             grad_norm_1 = self.x0_1.grad.norm().item() if self.x0_1.grad is not None else 0.0
             grad_norm_ssh = self.x0_ssh.grad.norm().item() if self.x0_ssh.grad is not None else 0.0
@@ -424,9 +482,14 @@ class ManualGradientDescent:
             if (iteration + 1) % 10 == 0 or iteration == 0:
                 log.info(f"Iteration {iteration + 1}/{self.num_iterations}")
                 log.info(f"  Total Loss: {total_loss.item():.6f}")
+                log.info(f"  Prediction RMSE: {pred_rmse:.6e}")
+                log.info(f"  Initial Condition RMSE: {ic_rmse:.6e}")
                 # log.info(f"  Grad Norms - Input1: {grad_norm_1:.6f}, Input2: {grad_norm_2:.6f}, Input3: {grad_norm_3:.6f}")
                 log.info(f"  Grad Norm - Input1: {grad_norm_1:.6f}, Grad Norm - SSH: {grad_norm_ssh:.6f}")
                 log.info(f"  Grad Norm - Input2: {grad_norm_2:.6f}, Grad Norm - Input3: {grad_norm_3:.6f}")
+                log.info(f"**" * 30)
+                self.print_error_analysis(iteration_errors)
+                log.info(f"**")
                 log.info("-" * 60)
             
             # Memory cleanup
@@ -434,7 +497,7 @@ class ManualGradientDescent:
             gc.collect()
             torch.cuda.empty_cache()
         
-        log.info("=" * 60)
+        log.info("="*60)
         log.info("Optimization completed!")
         log.info(f"Final loss: {loss_history[-1]:.6f}")
         log.info(f"Initial loss: {loss_history[0]:.6f}")
@@ -445,6 +508,11 @@ class ManualGradientDescent:
         y_hat1_final, y_hat2_final, y_hat3_final = self.forward()
         final_errors = self.compute_variable_errors(y_hat1_final, y_hat2_final, y_hat3_final)
         self.print_error_analysis(final_errors)
+        
+        # Close TensorBoard writer
+        if self.writer is not None:
+            self.writer.close()
+            log.info("TensorBoard logs saved successfully")
         
         return {
             'loss_history': loss_history,
@@ -749,6 +817,9 @@ def main():
     log.info(f"Device: {args.device}")
     log.info("=" * 60)
     
+    # Setup TensorBoard directory
+    tensorboard_dir = os.path.join(args.output_dir, 'tensorboard')
+    
     # Initialize optimizer
     optimizer = ManualGradientDescent(
         data_path=args.data_path,
@@ -758,7 +829,8 @@ def main():
         sample_idx=args.sample_idx,
         sequence_length=args.sequence_length,
         forecast_horizon=args.forecast_horizon,
-        device=args.device
+        device=args.device,
+        tensorboard_dir=tensorboard_dir
     )
     
     # Load data
