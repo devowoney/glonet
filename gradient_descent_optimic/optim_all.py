@@ -17,6 +17,7 @@ from typing import Tuple, Dict
 import gc
 import logging
 from datetime import datetime
+from torch.utils.tensorboard import SummaryWriter
 
 # Add path to glonet modules
 sys.path.append(str(Path(__file__).parent.parent / "glonet_daily_forecast_local"))
@@ -31,7 +32,7 @@ from optimIC_GD_glonetLit import GlonetGradientCheckpointing
 # Constants
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 now = datetime.now().strftime('%Y-%m-%d-%H%M%S')
-DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/training/outputs/man_optimIC_GD/{now}"
+DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/gradient_descent_optimic/outputs/man_optimIC_GD/{now}"
 
 # Setup logging
 log = logging.getLogger(__name__)
@@ -50,7 +51,8 @@ class ManualGradientDescent:
                  sample_idx: int = 0,
                  sequence_length: int = 2,
                  forecast_horizon: int = 7,
-                 device: str = "cuda:0"):
+                 device: str = "cuda:0",
+                 tensorboard_dir: str = None):
         
         self.data_path = data_path
         self.model_location = model_location
@@ -62,6 +64,12 @@ class ManualGradientDescent:
         self.sequence_length = sequence_length
         self.forecast_horizon = forecast_horizon
         self.device = device
+        
+        # Initialize TensorBoard writer
+        self.writer = None
+        if tensorboard_dir:
+            self.writer = SummaryWriter(log_dir=tensorboard_dir)
+            log.info(f"TensorBoard logging enabled: {tensorboard_dir}")
         
         # Initialize normalizers and denormalizers
         log.info("Loading normalizers and denormalizers...")
@@ -113,6 +121,11 @@ class ManualGradientDescent:
         self.best_y_hat1 = None
         self.best_y_hat2 = None
         self.best_y_hat3 = None
+        
+    def __del__(self):
+        """Clean up TensorBoard writer."""
+        if self.writer is not None:
+            self.writer.close()
         
     def _load_checkpoint_model(self, checkpoint_path: str, shape_in: Tuple[int, int, int, int]) -> torch.nn.Module:
         """Load a checkpoint-based model with gradient checkpointing."""
@@ -210,6 +223,11 @@ class ManualGradientDescent:
         self.target1 = torch.from_numpy(target1).float().unsqueeze(0).to(self.device)  # [1, C, H, W]
         self.target2 = torch.from_numpy(target2).float().unsqueeze(0).to(self.device)
         self.target3 = torch.from_numpy(target3).float().unsqueeze(0).to(self.device)
+        
+        # Store reference initial conditions before normalization (for IC RMSE computation)
+        self.x0_1_ref = torch.from_numpy(input1).float().unsqueeze(0).to(self.device).clone()
+        self.x0_2_ref = torch.from_numpy(input2).float().unsqueeze(0).to(self.device).clone()
+        self.x0_3_ref = torch.from_numpy(input3).float().unsqueeze(0).to(self.device).clone()
         
         # Normalize inputs (not targets - they stay in original space for loss calculation)
         self.x0_1 = self.normalizer1(self.x0_1)
@@ -313,139 +331,207 @@ class ManualGradientDescent:
             # Compute mean squared error per channel
             mse_per_channel = squared_errors_masked.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 85]
             
-            # Compute normalized MSE (divide by variance)
-            normalized_mse_per_channel = mse_per_channel / (y_variance.squeeze(2).squeeze(2) + 1e-10)  # [1, 85]
+            # Compute RMSE per channel
+            rmse_per_channel = torch.sqrt(mse_per_channel)  # [1, 85]
+            
+            # Compute variance manually for normalized RMSE
+            masked_y = y_all * ocean_mask_all  # [1, 85, H, W]
+            mean_y = masked_y.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 85]
+            mean_y_exp = mean_y.unsqueeze(-1).unsqueeze(-1)  # [1, 85, 1, 1]
+            variance_y = ((y_all - mean_y_exp) ** 2) * ocean_mask_all
+            var_per_channel = variance_y.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 85]
+            
+            # Compute normalized RMSE (divide by standard deviation)
+            normalized_rmse_per_channel = rmse_per_channel / (torch.sqrt(var_per_channel) + 1e-10)  # [1, 85]
             
             # Convert to numpy for easier indexing
-            mse_np = mse_per_channel.cpu().numpy().squeeze(0)  # [85]
-            norm_mse_np = normalized_mse_per_channel.cpu().numpy().squeeze(0)  # [85]
+            rmse_np = rmse_per_channel.cpu().numpy().squeeze(0)  # [85]
+            norm_rmse_np = normalized_rmse_per_channel.cpu().numpy().squeeze(0)  # [85]
+            
+            # Compute RMSE for initial conditions as reference
+            # Get current denormalized initial conditions
+            x0_1_current = self.denormalizer1(self.x0_1.detach())[:, -1, :, :, :]  # [1, 5, H, W] - last timestep
+            x0_2_current = self.denormalizer2(self.x0_2.detach())[:, -1, :, :, :]  # [1, 40, H, W]
+            x0_3_current = self.denormalizer3(self.x0_3.detach())[:, -1, :, :, :]  # [1, 40, H, W]
+            x0_current_all = torch.cat([x0_1_current, x0_2_current, x0_3_current], dim=1)  # [1, 85, H, W]
+            
+            # Reference initial conditions (last timestep)
+            x0_ref_all = torch.cat([
+                self.x0_1_ref[:, -1, :, :, :],
+                self.x0_2_ref[:, -1, :, :, :],
+                self.x0_3_ref[:, -1, :, :, :]
+            ], dim=1)  # [1, 85, H, W]
+            
+            # Compute IC squared errors
+            ic_squared_errors = (x0_ref_all - x0_current_all) ** 2  # [1, 85, H, W]
+            ic_squared_errors_masked = ic_squared_errors * ocean_mask_all
+            ic_mse_per_channel = ic_squared_errors_masked.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)  # [1, 85]
+            ic_rmse_per_channel = torch.sqrt(ic_mse_per_channel)  # [1, 85]
+            
+            # Compute variance of reference IC for normalization
+            masked_x0_ref = x0_ref_all * ocean_mask_all
+            mean_x0_ref = masked_x0_ref.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)
+            mean_x0_ref_exp = mean_x0_ref.unsqueeze(-1).unsqueeze(-1)
+            variance_x0_ref = ((x0_ref_all - mean_x0_ref_exp) ** 2) * ocean_mask_all
+            var_x0_ref_per_channel = variance_x0_ref.sum(dim=(2, 3)) / (n_ocean_points + 1e-10)
+            
+            ic_normalized_rmse_per_channel = ic_rmse_per_channel / (torch.sqrt(var_x0_ref_per_channel) + 1e-10)
+            
+            ic_rmse_np = ic_rmse_per_channel.cpu().numpy().squeeze(0)  # [85]
+            ic_normalized_rmse_np = ic_normalized_rmse_per_channel.cpu().numpy().squeeze(0)  # [85]
             
             # Extract errors for specific variables
             errors = {
-                'SSH': {
-                    'channels': [0],
-                    'mse': float(mse_np[0]),
-                    'normalized_mse': float(norm_mse_np[0]),
+                'Prediction': {
+                    'SSH': {
+                        'channels': [0],
+                        'rmse': float(rmse_np[0]),
+                        'normalized_rmse': float(norm_rmse_np[0]),
+                    },
+                    'thetao': {
+                        'channels': {
+                            'surface': [1],
+                            'shallow': list(range(5, 15)),
+                            'deep': list(range(45, 55)),
+                        },
+                        'mean_rmse': {
+                            'surface': float(rmse_np[1]),
+                            'shallow': float(rmse_np[5:15].mean()),
+                            'deep': float(rmse_np[45:55].mean()),
+                            'all': float(np.concatenate([rmse_np[1:2], rmse_np[5:15], rmse_np[45:55]]).mean()),
+                        },
+                        'mean_normalized_rmse': {
+                            'surface': float(norm_rmse_np[1]),
+                            'shallow': float(norm_rmse_np[5:15].mean()),
+                            'deep': float(norm_rmse_np[45:55].mean()),
+                            'all': float(np.concatenate([norm_rmse_np[1:2], norm_rmse_np[5:15], norm_rmse_np[45:55]]).mean()),
+                        }
+                    },
+                    'so': {
+                        'channels': {
+                            'surface': [2],
+                            'shallow': list(range(15, 25)),
+                            'deep': list(range(55, 65)),
+                        },
+                        'mean_rmse': {
+                            'surface': float(rmse_np[2]),
+                            'shallow': float(rmse_np[15:25].mean()),
+                            'deep': float(rmse_np[55:65].mean()),
+                            'all': float(np.concatenate([rmse_np[2:3], rmse_np[15:25], rmse_np[55:65]]).mean()),
+                        },
+                        'mean_normalized_rmse': {
+                            'surface': float(norm_rmse_np[2]),
+                            'shallow': float(norm_rmse_np[15:25].mean()),
+                            'deep': float(norm_rmse_np[55:65].mean()),
+                            'all': float(np.concatenate([norm_rmse_np[2:3], norm_rmse_np[15:25], norm_rmse_np[55:65]]).mean()),
+                        }
+                    },
+                    'uo': {
+                        'channels': {
+                            'surface': [3],
+                            'shallow': list(range(25, 35)),
+                            'deep': list(range(65, 75)),
+                        },
+                        'mean_rmse': {
+                            'surface': float(rmse_np[3]),
+                            'shallow': float(rmse_np[25:35].mean()),
+                            'deep': float(rmse_np[65:75].mean()),
+                            'all': float(np.concatenate([rmse_np[3:4], rmse_np[25:35], rmse_np[65:75]]).mean()),
+                        },
+                        'mean_normalized_rmse': {
+                            'surface': float(norm_rmse_np[3]),
+                            'shallow': float(norm_rmse_np[25:35].mean()),
+                            'deep': float(norm_rmse_np[65:75].mean()),
+                            'all': float(np.concatenate([norm_rmse_np[3:4], norm_rmse_np[25:35], norm_rmse_np[65:75]]).mean()),
+                        }
+                    },
+                    'vo': {
+                        'channels': {
+                            'surface': [4],
+                            'shallow': list(range(35, 45)),
+                            'deep': list(range(75, 85)),
+                        },
+                        'mean_rmse': {
+                            'surface': float(rmse_np[4]),
+                            'shallow': float(rmse_np[35:45].mean()),
+                            'deep': float(rmse_np[75:85].mean()),
+                            'all': float(np.concatenate([rmse_np[4:5], rmse_np[35:45], rmse_np[75:85]]).mean()),
+                        },
+                        'mean_normalized_rmse': {
+                            'surface': float(norm_rmse_np[4]),
+                            'shallow': float(norm_rmse_np[35:45].mean()),
+                            'deep': float(norm_rmse_np[75:85].mean()),
+                            'all': float(np.concatenate([norm_rmse_np[4:5], norm_rmse_np[35:45], norm_rmse_np[75:85]]).mean()),
+                        }
+                    },
                 },
-                'thetao': {
-                    'channels': {
-                        'surface': [1],
-                        'shallow': list(range(5, 15)),  # ch 5-14 in full array
-                        'deep': list(range(45, 55)),    # ch 45-54 in full array
+                'Initial Conditions': {
+                    'SSH': {
+                        'rmse': float(ic_rmse_np[0]),
+                        'normalized_rmse': float(ic_normalized_rmse_np[0]),
                     },
-                    'mse': {
-                        'surface': float(mse_np[1]),
-                        'shallow': mse_np[5:15].tolist(),
-                        'deep': mse_np[45:55].tolist(),
+                    'thetao': {
+                        'mean_rmse': {
+                            'surface': float(ic_rmse_np[1]),
+                            'shallow': float(ic_rmse_np[5:15].mean()),
+                            'deep': float(ic_rmse_np[45:55].mean()),
+                            'all': float(np.concatenate([ic_rmse_np[1:2], ic_rmse_np[5:15], ic_rmse_np[45:55]]).mean()),
+                        },
+                        'mean_normalized_rmse': {
+                            'surface': float(ic_normalized_rmse_np[1]),
+                            'shallow': float(ic_normalized_rmse_np[5:15].mean()),
+                            'deep': float(ic_normalized_rmse_np[45:55].mean()),
+                            'all': float(np.concatenate([ic_normalized_rmse_np[1:2], ic_normalized_rmse_np[5:15], ic_normalized_rmse_np[45:55]]).mean()),
+                        }
                     },
-                    'normalized_mse': {
-                        'surface': float(norm_mse_np[1]),
-                        'shallow': norm_mse_np[5:15].tolist(),
-                        'deep': norm_mse_np[45:55].tolist(),
+                    'so': {
+                        'mean_rmse': {
+                            'surface': float(ic_rmse_np[2]),
+                            'shallow': float(ic_rmse_np[15:25].mean()),
+                            'deep': float(ic_rmse_np[55:65].mean()),
+                            'all': float(np.concatenate([ic_rmse_np[2:3], ic_rmse_np[15:25], ic_rmse_np[55:65]]).mean()),
+                        },
+                        'mean_normalized_rmse': {
+                            'surface': float(ic_normalized_rmse_np[2]),
+                            'shallow': float(ic_normalized_rmse_np[15:25].mean()),
+                            'deep': float(ic_normalized_rmse_np[55:65].mean()),
+                            'all': float(np.concatenate([ic_normalized_rmse_np[2:3], ic_normalized_rmse_np[15:25], ic_normalized_rmse_np[55:65]]).mean()),
+                        }
                     },
-                    'mean_mse': {
-                        'surface': float(mse_np[1]),
-                        'shallow': float(mse_np[5:15].mean()),
-                        'deep': float(mse_np[45:55].mean()),
-                        'all': float(np.concatenate([mse_np[1:2], mse_np[5:15], mse_np[45:55]]).mean()),
+                    'uo': {
+                        'mean_rmse': {
+                            'surface': float(ic_rmse_np[3]),
+                            'shallow': float(ic_rmse_np[25:35].mean()),
+                            'deep': float(ic_rmse_np[65:75].mean()),
+                            'all': float(np.concatenate([ic_rmse_np[3:4], ic_rmse_np[25:35], ic_rmse_np[65:75]]).mean()),
+                        },
+                        'mean_normalized_rmse': {
+                            'surface': float(ic_normalized_rmse_np[3]),
+                            'shallow': float(ic_normalized_rmse_np[25:35].mean()),
+                            'deep': float(ic_normalized_rmse_np[65:75].mean()),
+                            'all': float(np.concatenate([ic_normalized_rmse_np[3:4], ic_normalized_rmse_np[25:35], ic_normalized_rmse_np[65:75]]).mean()),
+                        }
                     },
-                    'mean_normalized_mse': {
-                        'surface': float(norm_mse_np[1]),
-                        'shallow': float(norm_mse_np[5:15].mean()),
-                        'deep': float(norm_mse_np[45:55].mean()),
-                        'all': float(np.concatenate([norm_mse_np[1:2], norm_mse_np[5:15], norm_mse_np[45:55]]).mean()),
-                    }
-                },
-                'so': {
-                    'channels': {
-                        'surface': [2],
-                        'shallow': list(range(15, 25)),  # ch 15-24 in full array
-                        'deep': list(range(55, 65)),     # ch 55-64 in full array
+                    'vo': {
+                        'mean_rmse': {
+                            'surface': float(ic_rmse_np[4]),
+                            'shallow': float(ic_rmse_np[35:45].mean()),
+                            'deep': float(ic_rmse_np[75:85].mean()),
+                            'all': float(np.concatenate([ic_rmse_np[4:5], ic_rmse_np[35:45], ic_rmse_np[75:85]]).mean()),
+                        },
+                        'mean_normalized_rmse': {
+                            'surface': float(ic_normalized_rmse_np[4]),
+                            'shallow': float(ic_normalized_rmse_np[35:45].mean()),
+                            'deep': float(ic_normalized_rmse_np[75:85].mean()),
+                            'all': float(np.concatenate([ic_normalized_rmse_np[4:5], ic_normalized_rmse_np[35:45], ic_normalized_rmse_np[75:85]]).mean()),
+                        }
                     },
-                    'mse': {
-                        'surface': float(mse_np[2]),
-                        'shallow': mse_np[15:25].tolist(),
-                        'deep': mse_np[55:65].tolist(),
-                    },
-                    'normalized_mse': {
-                        'surface': float(norm_mse_np[2]),
-                        'shallow': norm_mse_np[15:25].tolist(),
-                        'deep': norm_mse_np[55:65].tolist(),
-                    },
-                    'mean_mse': {
-                        'surface': float(mse_np[2]),
-                        'shallow': float(mse_np[15:25].mean()),
-                        'deep': float(mse_np[55:65].mean()),
-                        'all': float(np.concatenate([mse_np[2:3], mse_np[15:25], mse_np[55:65]]).mean()),
-                    },
-                    'mean_normalized_mse': {
-                        'surface': float(norm_mse_np[2]),
-                        'shallow': float(norm_mse_np[15:25].mean()),
-                        'deep': float(norm_mse_np[55:65].mean()),
-                        'all': float(np.concatenate([norm_mse_np[2:3], norm_mse_np[15:25], norm_mse_np[55:65]]).mean()),
-                    }
-                },
-                'uo': {
-                    'channels': {
-                        'surface': [3],
-                        'shallow': list(range(25, 35)),  # ch 25-34 in full array
-                        'deep': list(range(65, 75)),     # ch 65-74 in full array
-                    },
-                    'mse': {
-                        'surface': float(mse_np[3]),
-                        'shallow': mse_np[25:35].tolist(),
-                        'deep': mse_np[65:75].tolist(),
-                    },
-                    'normalized_mse': {
-                        'surface': float(norm_mse_np[3]),
-                        'shallow': norm_mse_np[25:35].tolist(),
-                        'deep': norm_mse_np[65:75].tolist(),
-                    },
-                    'mean_mse': {
-                        'surface': float(mse_np[3]),
-                        'shallow': float(mse_np[25:35].mean()),
-                        'deep': float(mse_np[65:75].mean()),
-                        'all': float(np.concatenate([mse_np[3:4], mse_np[25:35], mse_np[65:75]]).mean()),
-                    },
-                    'mean_normalized_mse': {
-                        'surface': float(norm_mse_np[3]),
-                        'shallow': float(norm_mse_np[25:35].mean()),
-                        'deep': float(norm_mse_np[65:75].mean()),
-                        'all': float(np.concatenate([norm_mse_np[3:4], norm_mse_np[25:35], norm_mse_np[65:75]]).mean()),
-                    }
-                },
-                'vo': {
-                    'channels': {
-                        'surface': [4],
-                        'shallow': list(range(35, 45)),  # ch 35-44 in full array
-                        'deep': list(range(75, 85)),     # ch 75-84 in full array
-                    },
-                    'mse': {
-                        'surface': float(mse_np[4]),
-                        'shallow': mse_np[35:45].tolist(),
-                        'deep': mse_np[75:85].tolist(),
-                    },
-                    'normalized_mse': {
-                        'surface': float(norm_mse_np[4]),
-                        'shallow': norm_mse_np[35:45].tolist(),
-                        'deep': norm_mse_np[75:85].tolist(),
-                    },
-                    'mean_mse': {
-                        'surface': float(mse_np[4]),
-                        'shallow': float(mse_np[35:45].mean()),
-                        'deep': float(mse_np[75:85].mean()),
-                        'all': float(np.concatenate([mse_np[4:5], mse_np[35:45], mse_np[75:85]]).mean()),
-                    },
-                    'mean_normalized_mse': {
-                        'surface': float(norm_mse_np[4]),
-                        'shallow': float(norm_mse_np[35:45].mean()),
-                        'deep': float(norm_mse_np[75:85].mean()),
-                        'all': float(np.concatenate([norm_mse_np[4:5], norm_mse_np[35:45], norm_mse_np[75:85]]).mean()),
-                    }
                 },
                 # Store full channel-wise errors for reference
-                'all_channels_mse': mse_np.tolist(),
-                'all_channels_normalized_mse': norm_mse_np.tolist(),
+                'all_channels_rmse': rmse_np.tolist(),
+                'all_channels_normalized_rmse': norm_rmse_np.tolist(),
+                'ic_all_channels_rmse': ic_rmse_np.tolist(),
+                'ic_all_channels_normalized_rmse': ic_normalized_rmse_np.tolist(),
             }
             
             return errors
@@ -458,68 +544,38 @@ class ManualGradientDescent:
         
         # SSH
         log.info("\n[SSH - Sea Surface Height] (ch=0)")
-        log.info(f"  MSE:            {errors['SSH']['mse']:.6e}")
-        log.info(f"  Normalized MSE: {errors['SSH']['normalized_mse']:.6f}")
+        log.info(f"  Prediction RMSE:            {errors['Prediction']['SSH']['rmse']:.6e}")
+        log.info(f"  Prediction Normalized RMSE: {errors['Prediction']['SSH']['normalized_rmse']:.6f}")
+        log.info(f"  IC RMSE:                    {errors['Initial Conditions']['SSH']['rmse']:.6e}")
+        log.info(f"  IC Normalized RMSE:         {errors['Initial Conditions']['SSH']['normalized_rmse']:.6f}")
         
         # Temperature (thetao)
         log.info("\n[THETAO - Temperature]")
-        log.info(f"  Surface (ch=1):")
-        log.info(f"    MSE:            {errors['thetao']['mean_mse']['surface']:.6e}")
-        log.info(f"    Normalized MSE: {errors['thetao']['mean_normalized_mse']['surface']:.6f}")
-        log.info(f"  Shallow (ch=5:14, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['thetao']['mean_mse']['shallow']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['thetao']['mean_normalized_mse']['shallow']:.6f}")
-        log.info(f"  Deep (ch=45:54, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['thetao']['mean_mse']['deep']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['thetao']['mean_normalized_mse']['deep']:.6f}")
-        log.info(f"  Overall Mean:")
-        log.info(f"    Mean MSE:            {errors['thetao']['mean_mse']['all']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['thetao']['mean_normalized_mse']['all']:.6f}")
+        log.info(f"  Prediction - Overall Mean RMSE:            {errors['Prediction']['thetao']['mean_rmse']['all']:.6e}")
+        log.info(f"  Prediction - Overall Mean Normalized RMSE: {errors['Prediction']['thetao']['mean_normalized_rmse']['all']:.6f}")
+        log.info(f"  IC - Overall Mean RMSE:                    {errors['Initial Conditions']['thetao']['mean_rmse']['all']:.6e}")
+        log.info(f"  IC - Overall Mean Normalized RMSE:         {errors['Initial Conditions']['thetao']['mean_normalized_rmse']['all']:.6f}")
         
         # Salinity (so)
         log.info("\n[SO - Salinity]")
-        log.info(f"  Surface (ch=2):")
-        log.info(f"    MSE:            {errors['so']['mean_mse']['surface']:.6e}")
-        log.info(f"    Normalized MSE: {errors['so']['mean_normalized_mse']['surface']:.6f}")
-        log.info(f"  Shallow (ch=15:24, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['so']['mean_mse']['shallow']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['so']['mean_normalized_mse']['shallow']:.6f}")
-        log.info(f"  Deep (ch=55:64, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['so']['mean_mse']['deep']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['so']['mean_normalized_mse']['deep']:.6f}")
-        log.info(f"  Overall Mean:")
-        log.info(f"    Mean MSE:            {errors['so']['mean_mse']['all']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['so']['mean_normalized_mse']['all']:.6f}")
+        log.info(f"  Prediction - Overall Mean RMSE:            {errors['Prediction']['so']['mean_rmse']['all']:.6e}")
+        log.info(f"  Prediction - Overall Mean Normalized RMSE: {errors['Prediction']['so']['mean_normalized_rmse']['all']:.6f}")
+        log.info(f"  IC - Overall Mean RMSE:                    {errors['Initial Conditions']['so']['mean_rmse']['all']:.6e}")
+        log.info(f"  IC - Overall Mean Normalized RMSE:         {errors['Initial Conditions']['so']['mean_normalized_rmse']['all']:.6f}")
         
         # Eastward velocity (uo)
         log.info("\n[UO - Eastward Velocity]")
-        log.info(f"  Surface (ch=3):")
-        log.info(f"    MSE:            {errors['uo']['mean_mse']['surface']:.6e}")
-        log.info(f"    Normalized MSE: {errors['uo']['mean_normalized_mse']['surface']:.6f}")
-        log.info(f"  Shallow (ch=25:34, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['uo']['mean_mse']['shallow']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['uo']['mean_normalized_mse']['shallow']:.6f}")
-        log.info(f"  Deep (ch=65:74, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['uo']['mean_mse']['deep']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['uo']['mean_normalized_mse']['deep']:.6f}")
-        log.info(f"  Overall Mean:")
-        log.info(f"    Mean MSE:            {errors['uo']['mean_mse']['all']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['uo']['mean_normalized_mse']['all']:.6f}")
+        log.info(f"  Prediction - Overall Mean RMSE:            {errors['Prediction']['uo']['mean_rmse']['all']:.6e}")
+        log.info(f"  Prediction - Overall Mean Normalized RMSE: {errors['Prediction']['uo']['mean_normalized_rmse']['all']:.6f}")
+        log.info(f"  IC - Overall Mean RMSE:                    {errors['Initial Conditions']['uo']['mean_rmse']['all']:.6e}")
+        log.info(f"  IC - Overall Mean Normalized RMSE:         {errors['Initial Conditions']['uo']['mean_normalized_rmse']['all']:.6f}")
         
         # Northward velocity (vo)
         log.info("\n[VO - Northward Velocity]")
-        log.info(f"  Surface (ch=4):")
-        log.info(f"    MSE:            {errors['vo']['mean_mse']['surface']:.6e}")
-        log.info(f"    Normalized MSE: {errors['vo']['mean_normalized_mse']['surface']:.6f}")
-        log.info(f"  Shallow (ch=35:44, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['vo']['mean_mse']['shallow']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['vo']['mean_normalized_mse']['shallow']:.6f}")
-        log.info(f"  Deep (ch=75:84, 10 levels):")
-        log.info(f"    Mean MSE:            {errors['vo']['mean_mse']['deep']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['vo']['mean_normalized_mse']['deep']:.6f}")
-        log.info(f"  Overall Mean:")
-        log.info(f"    Mean MSE:            {errors['vo']['mean_mse']['all']:.6e}")
-        log.info(f"    Mean Normalized MSE: {errors['vo']['mean_normalized_mse']['all']:.6f}")
+        log.info(f"  Prediction - Overall Mean RMSE:            {errors['Prediction']['vo']['mean_rmse']['all']:.6e}")
+        log.info(f"  Prediction - Overall Mean Normalized RMSE: {errors['Prediction']['vo']['mean_normalized_rmse']['all']:.6f}")
+        log.info(f"  IC - Overall Mean RMSE:                    {errors['Initial Conditions']['vo']['mean_rmse']['all']:.6e}")
+        log.info(f"  IC - Overall Mean Normalized RMSE:         {errors['Initial Conditions']['vo']['mean_normalized_rmse']['all']:.6f}")
         
         log.info("\n" + "=" * 80)
     
@@ -585,6 +641,35 @@ class ManualGradientDescent:
                     self.best_y_hat2 = y_hat2.detach().clone()
                     self.best_y_hat3 = y_hat3.detach().clone()
             
+            # Compute error metrics for TensorBoard logging
+            iteration_errors = self.compute_variable_errors(y_hat1, y_hat2, y_hat3)
+            
+            # Log to TensorBoard
+            if self.writer is not None:
+                # Loss
+                self.writer.add_scalar('Loss/total_loss', total_loss.item(), iteration)
+                self.writer.add_scalar('Loss/loss1', loss1.item(), iteration)
+                self.writer.add_scalar('Loss/loss2', loss2.item(), iteration)
+                self.writer.add_scalar('Loss/loss3', loss3.item(), iteration)
+                
+                # Prediction RMSE by variable
+                self.writer.add_scalar('RMSE/Prediction/SSH', iteration_errors['Prediction']['SSH']['rmse'], iteration)
+                self.writer.add_scalar('RMSE/Prediction/thetao', iteration_errors['Prediction']['thetao']['mean_rmse']['all'], iteration)
+                self.writer.add_scalar('RMSE/Prediction/so', iteration_errors['Prediction']['so']['mean_rmse']['all'], iteration)
+                self.writer.add_scalar('RMSE/Prediction/uo', iteration_errors['Prediction']['uo']['mean_rmse']['all'], iteration)
+                self.writer.add_scalar('RMSE/Prediction/vo', iteration_errors['Prediction']['vo']['mean_rmse']['all'], iteration)
+                
+                # Initial Condition RMSE by variable
+                self.writer.add_scalar('RMSE/InitialCondition/SSH', iteration_errors['Initial Conditions']['SSH']['rmse'], iteration)
+                self.writer.add_scalar('RMSE/InitialCondition/thetao', iteration_errors['Initial Conditions']['thetao']['mean_rmse']['all'], iteration)
+                self.writer.add_scalar('RMSE/InitialCondition/so', iteration_errors['Initial Conditions']['so']['mean_rmse']['all'], iteration)
+                self.writer.add_scalar('RMSE/InitialCondition/uo', iteration_errors['Initial Conditions']['uo']['mean_rmse']['all'], iteration)
+                self.writer.add_scalar('RMSE/InitialCondition/vo', iteration_errors['Initial Conditions']['vo']['mean_rmse']['all'], iteration)
+                
+                # Normalized RMSE
+                self.writer.add_scalar('RMSE_Normalized/Prediction/SSH', iteration_errors['Prediction']['SSH']['normalized_rmse'], iteration)
+                self.writer.add_scalar('RMSE_Normalized/InitialCondition/SSH', iteration_errors['Initial Conditions']['SSH']['normalized_rmse'], iteration)
+            
             # Compute gradient norms
             grad_norm_1 = self.x0_1.grad.norm().item() if self.x0_1.grad is not None else 0.0
             grad_norm_2 = self.x0_2.grad.norm().item() if self.x0_2.grad is not None else 0.0
@@ -595,6 +680,8 @@ class ManualGradientDescent:
                 log.info(f"Iteration {iteration + 1}/{self.num_iterations}")
                 log.info(f"  Total Loss: {total_loss.item():.6f}")
                 log.info(f"  Loss 1: {loss1.item():.6f}, Loss 2: {loss2.item():.6f}, Loss 3: {loss3.item():.6f}")
+                log.info(f"  Prediction RMSE - SSH: {iteration_errors['Prediction']['SSH']['rmse']:.6e}")
+                log.info(f"  IC RMSE - SSH: {iteration_errors['Initial Conditions']['SSH']['rmse']:.6e}")
                 log.info(f"  Grad Norms - Input1: {grad_norm_1:.6f}, Input2: {grad_norm_2:.6f}, Input3: {grad_norm_3:.6f}")
                 log.info("-" * 60)
             
@@ -603,7 +690,7 @@ class ManualGradientDescent:
             gc.collect()
             torch.cuda.empty_cache()
         
-        log.info("=" * 60)
+        log.info("="*60)
         log.info("Optimization completed!")
         log.info(f"Final loss: {loss_history[-1]:.6f}")
         log.info(f"Initial loss: {loss_history[0]:.6f}")
@@ -614,6 +701,11 @@ class ManualGradientDescent:
         y_hat1_final, y_hat2_final, y_hat3_final = self.forward()
         final_errors = self.compute_variable_errors(y_hat1_final, y_hat2_final, y_hat3_final)
         self.print_error_analysis(final_errors)
+        
+        # Close TensorBoard writer
+        if self.writer is not None:
+            self.writer.close()
+            log.info("TensorBoard logs saved successfully")
         
         return {
             'loss_history': loss_history,
@@ -913,7 +1005,10 @@ def main():
     log.info(f"Learning rate: {args.learning_rate}")
     log.info(f"Number of iterations: {args.num_iterations}")
     log.info(f"Device: {args.device}")
-    log.info("=" * 60)
+    log.info("="*60)
+    
+    # Setup TensorBoard directory
+    tensorboard_dir = os.path.join(args.output_dir, 'tensorboard')
     
     # Initialize optimizer
     optimizer = ManualGradientDescent(
@@ -924,7 +1019,8 @@ def main():
         sample_idx=args.sample_idx,
         sequence_length=args.sequence_length,
         forecast_horizon=args.forecast_horizon,
-        device=args.device
+        device=args.device,
+        tensorboard_dir=tensorboard_dir
     )
     
     # Load data

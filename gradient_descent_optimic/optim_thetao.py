@@ -31,7 +31,7 @@ from optimIC_GD_glonetLit import GlonetGradientCheckpointing
 # Constants
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 now = datetime.now().strftime('%Y-%m-%d-%H%M%S')
-DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/training/outputs/man_optimIC_GD/{now}_thetao"
+DEFAULT_OUTPUT_DIR = f"/Odyssey/private/j25lee/glonet/gradient_descent_optimic/outputs/man_optimIC_GD/{now}_thetao"
 
 # Setup logging
 log = logging.getLogger(__name__)

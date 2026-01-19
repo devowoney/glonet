@@ -469,8 +469,8 @@ class ManualGradientDescent:
                 self.writer.add_scalar('Loss/total_loss', total_loss.item(), iteration)
                 self.writer.add_scalar('RMSE/prediction', pred_rmse, iteration)
                 self.writer.add_scalar('RMSE/initial_condition', ic_rmse, iteration)
-                self.writer.add_scalar('RMSE/normalized_prediction', iteration_errors['Prediction']['SSH']['normalized_rmse'], iteration)
-                self.writer.add_scalar('RMSE/normalized_initial_condition', iteration_errors['Initial Conditions']['SSH']['normalized_rmse'], iteration)
+                self.writer.add_scalar('normalized_RMSE/prediction', iteration_errors['Prediction']['SSH']['normalized_rmse'], iteration)
+                self.writer.add_scalar('normalized_RMSE/initial_condition', iteration_errors['Initial Conditions']['SSH']['normalized_rmse'], iteration)
             
             # Compute gradient norms
             grad_norm_1 = self.x0_1.grad.norm().item() if self.x0_1.grad is not None else 0.0
