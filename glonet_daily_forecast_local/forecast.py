@@ -341,7 +341,7 @@ def aforecast3(d, date, cycle):
     return datasets
 
 def create_forecast(init_dir : Path,
-                    forecast_cycle : int = None, 
+                    forecast_cycle : int = 7, 
                     output_path : Path = None) -> xr.Dataset :
     # Extract string date
     init_date_str = str(init_dir.parent).split("_init_", 1)[0].rsplit("/", 1)[1] if "_init_" in str(init_dir.parent) else None
@@ -439,7 +439,7 @@ def parse_args ():
         "-c", "--cycle",
         dest="forecast_cycle",
         type=int,
-        required=False,
+        default=7,
         help="Define forecast cycle of GLONET. Default cylce is 7 for 7-day forecast."
     )
     
@@ -447,7 +447,7 @@ def parse_args ():
         "-o", "--output",
         dest="output_path",
         type=Path,
-        required=False,
+        default=None,
         help="Path to save output file. If output is not given by terminal input, the output will be saved in default location"
     )
     
