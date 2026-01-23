@@ -16,7 +16,7 @@ import logging
 # Add current directory to path first to import local utility.py
 script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, script_dir)
-sys.path.insert(1, '/Odyssey/private/j25lee/glonet/src/glonet')
+sys.path.insert(1, '/Odyssey/private/j25lee/glonet/glonet_daily_forecast_local') # For utility.py
 
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 INPUT_LOCATION = "/Odyssey/public/glonet"
