@@ -748,10 +748,10 @@ class ManualGradientDescent:
                                                        self.ocean_mask_2,
                                                        self.ocean_mask_3], dim=0).unsqueeze(0)  # [1, 85, H, W]
                     
-                    self.optimal_perturb = self.x0.detach().clone()
+                    self.optimized_input = self.x0.detach().clone()
                     self.best_y_hat = y_hat.detach().clone()
                     
-                    self.ic_correction = (self.optimal_perturb - self.x0_ref).detach() * ocean_mask_all
+                    self.optimal_perturb = (self.optimized_input - self.x0_ref).detach() * ocean_mask_all
                     self.pred_correction = (self.best_y_hat - y_hat_initial).detach() * ocean_mask_all_noseq
                     self.pred_mismatch = (self.best_y_hat - self.target).detach() * ocean_mask_all_noseq
             
@@ -856,9 +856,9 @@ class ManualGradientDescent:
         #     opt_x0_3 = self.denormalizer3(self.x0_3.detach())
         
         # Convert to numpy and remove batch dimension
-        opt_x0_1_np = self.optimal_perturb[:, :, 0:5, :, :].clone().detach().cpu().numpy().squeeze(0)  # [T, C, H, W]
-        opt_x0_2_np = self.optimal_perturb[:, :, 5:45, :, :].clone().detach().cpu().numpy().squeeze(0)
-        opt_x0_3_np = self.optimal_perturb[:, :, 45:85, :, :].clone().detach().cpu().numpy().squeeze(0)
+        opt_x0_1_np = self.optimized_input[:, :, 0:5, :, :].clone().detach().cpu().numpy().squeeze(0)  # [T, C, H, W]
+        opt_x0_2_np = self.optimized_input[:, :, 5:45, :, :].clone().detach().cpu().numpy().squeeze(0)
+        opt_x0_3_np = self.optimized_input[:, :, 45:85, :, :].clone().detach().cpu().numpy().squeeze(0)
         
         # Get dimensions
         time, channel1, height, width = opt_x0_1_np.shape
@@ -918,7 +918,7 @@ class ManualGradientDescent:
         log.info(f"  {path3} - shape {opt_x0_3_np.shape}")
         
         # Save IC correction fields as well
-        ic_correction_np = self.ic_correction.cpu().numpy().squeeze(0)  # [T, C, H, W] where T=2
+        ic_correction_np = self.optimal_perturb.cpu().numpy().squeeze(0)  # [T, C, H, W] where T=2
         
         cr1 = xr.Dataset({
             'data': (['time', 'ch', 'lat', 'lon'], ic_correction_np[:, 0:5, :, :])
