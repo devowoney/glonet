@@ -274,6 +274,14 @@ class ManualGradientDescent:
             y_hat1 = self.model1(x1_in_std)  # [1, T, C, H, W]
             y_hat2 = self.model2(x2_in_std)
             y_hat3 = self.model3(x3_in_std)
+            
+            # Auto regressive forecasting for forecast_horizon steps
+            # Following forecast.py: output goes directly back as input
+            if self.forecast_horizon > 1 :
+                for i in range(self.forecast_horizon - 1) :
+                    y_hat1 = self.model1(y_hat1)
+                    y_hat2 = self.model2(y_hat2)
+                    y_hat3 = self.model3(y_hat3)
         
             # Extract the last timestep as prediction
             y_hat1 = y_hat1[:, -1, :, :, :]  # [1, C, H, W]
@@ -1201,6 +1209,9 @@ def main():
     log.info(f"Output directory: {args.output_dir}")
     log.info(f"Learning rate: {args.learning_rate}")
     log.info(f"Number of iterations: {args.num_iterations}")
+    log.info(f"Sample index: {args.sample_idx}")
+    log.info(f"Sequence length: {args.sequence_length}")
+    log.info(f"Forecast horizon: {args.forecast_horizon}")
     log.info(f"Device: {args.device}")
     log.info("="*60)
     
