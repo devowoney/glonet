@@ -4,12 +4,13 @@
 # ├── config.yaml               
 # ├── model/                    
 # │   ├── glonet.yaml           
-# │   └── glonet_patch.yaml     
+# │   └── glonet_patch.yaml 
 # ├── data/                     
-# │   └── GLORYS12.yaml    ✔
+# │   ├── GLORYS12.yaml         ✔
+# │   └── GLORYS12_0125.yaml         
 # └── training/                 
-#     ├── default.yaml          
-#     └── fast.yaml             
+#     ├── default.yaml
+#     └── fast.yaml                 
 # -----------------------------
 
 data_paths: '/Odyssey/public/glonet/glorys12_1993-07-01_to_1993-12-31_init_states/combined_input.nc'
