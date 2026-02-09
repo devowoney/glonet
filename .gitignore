@@ -13,3 +13,4 @@ __pycache__/
 training/src/__pycache__/
 training/data/
 .vscode/
+training/config/*

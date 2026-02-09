@@ -263,7 +263,6 @@ class XrDataset(Dataset):
             log.info(f"-->>Applied spatial cropping: {lat_dim}[{start_h}:{end_h}], {lon_dim}[{start_w}:{end_w}]")
 
         # Rechunk for efficient I/O - use batch_size for time chunking
-        # This aligns chunking with actual DataLoader batch size for better I/O performance
         chunks = {'time': self.batch_size, 'lat': self.patch_size[0], 'lon': self.patch_size[1]}
         self.data = self.data.chunk(chunks)
         
@@ -386,8 +385,6 @@ class XrDataset(Dataset):
         log.warning(f"Statistics will be saved to: {self.stat_path}")
         
         # Calculate statistics only on training data across spatial dimensions
-        # Dataset has (time, ch, lat, lon) dimensions with one variable 'data'
-        
         # Dimension to make statistics (across time and spatial dimensions, keeping channel dimension)
         dim_stat = [self.time_dim, self.spatial_dims[0], self.spatial_dims[1]]
         
@@ -404,7 +401,6 @@ class XrDataset(Dataset):
         self.data_maxs = maxs
         
         # Ensure no zero std values and handle NaN in std
-        # Iterate over the Dataset variables (should be just 'data')
         for var_name in self.data.data_vars:
             std_vals = self.stds[var_name]
             std_vals = xr.where(std_vals < 1e-8, 1e-8, std_vals)
@@ -470,7 +466,6 @@ class XrDataset(Dataset):
         })
         
         # Convert to torch tensors and stack variables along channel dimension
-        # Input sequence: [T, C, H, W]
         input_arrays = []
         target_arrays = []
         
@@ -500,7 +495,6 @@ class XrDataset(Dataset):
                 std_vals = self.stds[var].values if hasattr(self.stds[var], 'values') else self.stds[var]
                 
                 # Reshape for proper broadcasting: 
-                # mean_vals/std_vals shape: (C,) -> (1, C, 1, 1) for input, (C, 1, 1) for target
                 mean_vals_input = mean_vals.reshape(1, -1, 1, 1)  # (1, C, 1, 1) for broadcasting with (T, C, H, W)
                 std_vals_input = std_vals.reshape(1, -1, 1, 1)
                 mean_vals_target = mean_vals.reshape(-1, 1, 1)    # (C, 1, 1) for broadcasting with (C, H, W)
@@ -595,10 +589,9 @@ class GlonetDataModule(pl.LightningDataModule):
             start_time = time.time()
             
             # Create a minimal dataset instance just to load and preprocess data
-            # Temporarily disable statistics calculation to speed up data loading
             temp_params = self.dataset_params.copy()
             temp_params['normalize'] = False  # Disable normalization/standardization
-            temp_params['standardize'] = False  # to avoid expensive statistics calculation
+            temp_params['standardize'] = False 
             
             temp_dataset = XrDataset(split='train', **temp_params)
             self._shared_data = temp_dataset.data
