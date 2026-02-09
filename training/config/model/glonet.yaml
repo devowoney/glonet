@@ -16,6 +16,7 @@
 # GLONET Model Configuration
 _target_: src.glonetLit.Glonet
 
+# ============================================= Global model parameters ==
 # Model dimensions
 dim: [2, 85, 672, 1440]  # [T, C, H, W] - Time, Channels, Height, Width
 
@@ -28,6 +29,7 @@ ker: [3, 5, 7]      # Kernel sizes for inception blocks
 groups: 8           # Number of groups for convolutions
 
 # ============================================= Sub-module configurations ==
+sub_module_config: False  # Set to True to use sub-module configurations below
 space:
   _target_: src.blocks.mspace
   channel_in: 5

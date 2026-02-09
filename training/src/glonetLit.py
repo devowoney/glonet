@@ -25,11 +25,19 @@ class Glonet(pl.LightningModule):
         self.Wn = int(W / 2 ** (self.model_cfg.NT / 2))
         
         # Initialize sub-modules
-        self.space = mspace(T*self.model_cfg.dT, self.model_cfg.dS, self.model_cfg.NS, 
-                            self.Hn, self.Wn, self.model_cfg.ker, self.model_cfg.groups)
-        self.dynamics = tmp(dim=self.dim, n_heads=4, patch_size=[16,16])
-        self.maps = Encoder(C, self.model_cfg.dT, self.model_cfg.NT)
-        self.mapsback = Decoder(self.model_cfg.dT, C, self.model_cfg.NT)
+        if cfg.model.get('sub_module_config', False):
+            # Sub-module from hydra
+            self.space = hydra.utils.instantiate(cfg.model.space)
+            self.dynamics = hydra.utils.instantiate(cfg.model.dynamics)
+            self.maps = hydra.utils.instantiate(cfg.model.maps)
+            self.mapsback = hydra.utils.instantiate(cfg.model.mapsback)
+        else:
+            # Manual initialization
+            self.space = mspace(T*self.model_cfg.dT, self.model_cfg.dS, self.model_cfg.NT, 
+                                self.Hn, self.Wn, self.model_cfg.ker, self.model_cfg.groups)
+            self.dynamics = tmp(dim=self.dim, n_heads=4, patch_size=[16,16])
+            self.maps = Encoder(C, self.model_cfg.dT, self.model_cfg.NT)
+            self.mapsback = Decoder(self.model_cfg.dT, C, self.model_cfg.NT)
         
         # Loss function
         self.loss_fn = hydra.utils.instantiate(cfg.training.loss)

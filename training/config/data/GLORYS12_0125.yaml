@@ -21,9 +21,9 @@ dimensions:
   time: "time"
 
 computing:
-  # time_minibatch_size: 15
-  patch_size: [96, 96]
-  enable_patching: false
+  time_minibatch_size: 15
+#   patch_size: [96, 96]
+#   enable_patching: false
 
 sample_idx: 0
 sequence_length: 2
@@ -38,8 +38,8 @@ preprocessing:
 # val_split: 0.1
 # test_split: 0.1
 
-# statistics:
-#   stat_path: ${hydra:run.dir}/statistics.stat
+statistics:
+  stat_path: ${hydra:run.dir}/statistics.stat
 
 dataloader:
   batch_size: 32

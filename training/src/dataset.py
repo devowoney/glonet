@@ -37,7 +37,7 @@ class XrDataset(Dataset):
                  spatial_dims: Tuple[str, str] = ('lat', 'lon'),
                  time_dim: str = 'time',
                  patch_size: Tuple[int, int] = (96, 96),
-                 enable_patching: bool = True,
+                 enable_patching: bool = False,
                  sequence_length: int = 2,
                  forecast_horizon: int = 7,
                  crop_zone: Optional[Tuple[int, int, int, int]] = None,

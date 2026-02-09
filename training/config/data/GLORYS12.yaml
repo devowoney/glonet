@@ -20,9 +20,9 @@ dimensions:
   spatial: ['lat', 'lon'] # bracket for listing
   time: 'time'
 
-computing:
-  patch_size: [96, 96]
-  enable_patching: true
+# computing:
+#   patch_size: [96, 96]
+#   enable_patching: false
 
 sequence_length: 2
 forecast_horizon: 7
