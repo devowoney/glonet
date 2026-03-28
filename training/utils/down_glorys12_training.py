@@ -125,7 +125,7 @@ def create_data(ds_out, depth):
         },
         coords={
             "time": ("time", time),
-            "ch": ("ch", range(0, tt.shape[1])),
+            "ch": ("ch", numpy.arange(0, tt.shape[1])),
             "lat": ("lat", lat),
             "lon": ("lon", lon),
         },
@@ -174,7 +174,7 @@ def create_init_states_data(start_date : str,
     
     # Reassign the `ch` dimension to ensure it is unique and sequential
     combined_dataset = combined_dataset.assign_coords(
-        ch=("ch", range(combined_dataset.sizes["ch"]))
+        ch=("ch", numpy.arange(combined_dataset.sizes["ch"]))
     )
 
     # Write the concatenated dataset to a single NetCDF file
