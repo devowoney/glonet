@@ -550,7 +550,7 @@ class GPUCurrentBasedPerturbationGenerator :
         Generate multiple perturbations in parallel on GPU.
         
         Args:
-            perturbation_type: 'one_vector', 'pointwise_1', or 'pointwise_2'
+            perturbation_type: 'one_vector' or 'pointwise'
             seeds: List of seeds for ensemble members
             
         Returns:
@@ -582,22 +582,30 @@ class GPUCurrentBasedPerturbationGenerator :
                         noise_u_t0 = noise_gen.noise
                         noise_v_t0, noise_u_t1, noise_v_t1 = noise_u_t0, noise_u_t0, noise_u_t0
                     else :
-                        noise_gen_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, seed, self.device, amplitude)
-                        noise_gen_t1 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, seed + 1, self.device, amplitude)
+                        noise_gen_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, 
+                                                                   seed, self.device, amplitude)
+                        noise_gen_t1 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, 
+                                                                   seed + 1, self.device, amplitude)
                         noise_u_t0 = noise_gen_t0.noise
                         noise_v_t0 = noise_u_t0
                         noise_u_t1 = noise_gen_t1.noise
                         noise_v_t1 = noise_u_t1
                 else :
                     if is_same_noise_in_time :
-                        noise_u_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, seed, self.device, amplitude).noise
-                        noise_v_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, seed + 1, self.device, amplitude).noise
+                        noise_u_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, 
+                                                                 seed, self.device, amplitude).noise
+                        noise_v_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, 
+                                                                 seed + 1, self.device, amplitude).noise
                         noise_u_t1, noise_v_t1 = noise_u_t0, noise_v_t0
                     else :
-                        noise_u_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, seed, self.device, amplitude).noise
-                        noise_v_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, seed + 1, self.device, amplitude).noise
-                        noise_u_t1 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, seed + 2, self.device, amplitude).noise
-                        noise_v_t1 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, seed + 3, self.device, amplitude).noise
+                        noise_u_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, 
+                                                                 seed, self.device, amplitude).noise
+                        noise_v_t0 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, 
+                                                                 seed + 1, self.device, amplitude).noise
+                        noise_u_t1 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, 
+                                                                 seed + 2, self.device, amplitude).noise
+                        noise_v_t1 = GPUStochasticNoiseGenerator(self.ssh_anomaly, is_pointwise, 
+                                                                 seed + 3, self.device, amplitude).noise
                 
                 # Compute displacement fields
                 if perturbation_type == 'one_vector' :
@@ -662,11 +670,27 @@ def parse_args():
         description='GPU-Accelerated Ensemble Generation for Ocean Data',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
+    parser.add_argument('--mode', 
+                        type=str,
+                        default='calibrate',
+                        choices=['calibrate', 'initialize'],
+                        help='Calibrate or initialize the ensemble generation process')
     
     parser.add_argument('--data-path', 
                         type=str,
                         default='/Odyssey/public/glonet/glorys12_1993-01-01_to_1993-06-30_init_states/combined_input.nc',
-                        help='Path to input NetCDF data file')
+                        help='Path to input NetCDF data file or directory. In calibrate mode, reads all .nc files from directory')
+    
+    parser.add_argument('--num-perturbations',
+                        type=int,
+                        default=10,
+                        help='Number of perturbations to generate per member (when using --input-dir)')
+    
+    parser.add_argument('--perturbation-type',
+                        type=str,
+                        default='pointwise',
+                        choices=['one_vector', 'pointwise'],
+                        help='Type of perturbation to generate')
     
     parser.add_argument('--target-idx', 
                         type=int, 
@@ -685,7 +709,7 @@ def parse_args():
     
     parser.add_argument('--output-dir', 
                         type=str, 
-                        default='./ensemble_output_gpu', 
+                        default=None,
                         help='Output directory for ensemble members')
     
     parser.add_argument('--dt', 
@@ -731,18 +755,146 @@ def main() :
         print(f"Available GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
     print()
     
+    # Check mode and route accordingly
+    if args.mode == 'calibrate':
+        run_calibrate_mode(args, device)
+    else:
+        run_initialize_mode(args, device)
+
+
+def run_calibrate_mode(args, device):
+    """Run calibrate mode: read all NetCDF files from directory and generate perturbations"""
+    data_path = Path(args.data_path)
+    
+    # Collect all NetCDF files from directory
+    if data_path.is_dir():
+        nc_files = sorted(list(data_path.glob("*.nc")))
+        print(f"Found {len(nc_files)} NetCDF files in {data_path}")
+    else:
+        # Single file mode
+        nc_files = [data_path]
+        print(f"Processing single file: {data_path}")
+    
+    if not nc_files:
+        print("Error: No NetCDF files found!")
+        return
+    
+    # Create output directories
+    if args.output_dir :
+        perturbation_dir = Path(args.output_dir) 
+    else :
+        output_dir = Path(args.data_path)
+        perturbation_dir = output_dir / args.perturbation_type
+
+    
+    perturbation_dir.mkdir(parents=True, exist_ok=True)
+    
+    print("\nConfiguration:")
+    print(f"  Mode: calibrate")
+    print(f"  Data path: {args.data_path}")
+    print(f"  Number of input files: {len(nc_files)}")
+    print(f"  Perturbations per file: {args.num_perturbations}")
+    print(f"  Perturbation type: {args.perturbation_type}")
+    print(f"  Target index: {args.target_idx}")
+    print(f"  Batch size: {args.batch_size} (parallel ensemble members)")
+    print(f"  Output directory: {perturbation_dir}")
+    print()
+    
+    start_time = time.time()
+    total_members_generated = 0
+    
+    # Process each NetCDF file
+    for file_idx, nc_file in enumerate(nc_files):
+        print("="*80)
+        print(f"Processing file {file_idx + 1}/{len(nc_files)}: {nc_file.name}")
+        print("="*80)
+        
+        # Initialize generator for this file
+        print("Initializing GPU generator...")
+        file_start = time.time()
+        generator = GPUCurrentBasedPerturbationGenerator(
+            data_path=str(nc_file),
+            target_idx=args.target_idx,
+            climato_path=args.climato_path,
+            rand_ds_path=args.rand_ds_path,
+            dt=args.dt,
+            device=device,
+            batch_size=args.batch_size,
+            onenoise_amplitude=args.onenoise_amplitude,
+            pointwisenoise_amplitude=args.pointwisenoise_amplitude
+        )
+        print(f"✓ Initialization complete ({time.time() - file_start:.2f}s)\n")
+        
+        # Generate perturbations
+        seeds = [args.base_seed + file_idx * 10000 + i for i in range(args.num_perturbations)]
+        
+        # Set perturbation parameters based on type
+        if args.perturbation_type == 'one_vector':
+            is_same_noise_in_time = True
+            is_same_noise_for_component = True
+        else:  # pointwise
+            is_same_noise_in_time = False
+            is_same_noise_for_component = False
+        
+        print(f"Generating {args.num_perturbations} perturbations using {args.perturbation_type}...") 
+        perturbed_states = generator.generate_batch_perturbations(
+            perturbation_type=args.perturbation_type,
+            seeds=seeds,
+            is_same_noise_in_time=is_same_noise_in_time,
+            is_same_noise_for_component=is_same_noise_for_component,
+            extraction_depth=0 if args.perturbation_type == 'one_vector' else None
+        )
+        
+        # Save perturbations
+        for idx, state in enumerate(perturbed_states):
+            member_id = file_idx * args.num_perturbations + idx
+            output_path = perturbation_dir / f"member_{member_id:03d}_initial_condition.nc"
+            
+            ds_out = xr.Dataset({
+                "data": xr.DataArray(
+                    state.squeeze(0),
+                    dims=["time", "ch", "lat", "lon"],
+                    coords={
+                        "time": generator.dataset["data"].time,
+                        "ch": generator.dataset["data"].ch,
+                        "lat": generator.dataset["data"].lat,
+                        "lon": generator.dataset["data"].lon
+                    }
+                )
+            })
+            ds_out.to_netcdf(output_path)
+            total_members_generated += 1
+        
+        file_elapsed = time.time() - file_start
+        print(f"✓ File {file_idx + 1} complete: {file_elapsed:.2f}s ({file_elapsed/args.num_perturbations:.2f}s per member)")
+        print(f"  Saved {args.num_perturbations} members (total: {total_members_generated})\n")
+    
+    # Summary
+    total_time = time.time() - start_time
+    print("="*80)
+    print("CALIBRATE MODE COMPLETE")
+    print("="*80)
+    print(f"Total files processed: {len(nc_files)}")
+    print(f"Total members generated: {total_members_generated}")
+    print(f"Total time: {total_time:.2f}s ({total_time/total_members_generated:.2f}s per member)")
+    print(f"Output directory: {perturbation_dir}")
+    print()
+
+
+def run_initialize_mode(args, device):
+    """Run initialize mode: generate ensemble with 40/80 members for two methods"""
     # Create output directories
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
     onevector_dir = output_dir / "one_vector"
-    pointwise1_dir = output_dir / "pointwise_1"
-    pointwise2_dir = output_dir / "pointwise_2"
+    pointwise1_dir = output_dir / "pointwise"
     
-    for dir_path in [onevector_dir, pointwise1_dir, pointwise2_dir]:
+    for dir_path in [onevector_dir, pointwise1_dir]:
         dir_path.mkdir(parents=True, exist_ok=True)
     
     print("Configuration:")
+    print(f"  Mode: initialize")
     print(f"  Data path: {args.data_path}")
     print(f"  Target index: {args.target_idx}")
     print(f"  Batch size: {args.batch_size} (parallel ensemble members)")
@@ -766,13 +918,13 @@ def main() :
     print(f"✓ Initialization complete ({time.time() - start_time:.2f}s)")
     print()
     
-    # Method 1: One Vector (40 members)
+    # Method 1: One Vector (50 members)
     print("="*80)
-    print("METHOD 1: ONE VECTOR - 40 MEMBERS (GPU Parallel)")
+    print("METHOD 1: ONE VECTOR - 50 MEMBERS (GPU Parallel)")
     print("="*80)
     start_method1 = time.time()
     
-    seeds_onevector = [args.base_seed + i + 10 for i in range(40)]
+    seeds_onevector = [args.base_seed + i + 10 for i in range(50)]
     perturbed_states = generator.generate_batch_perturbations(
         perturbation_type='one_vector',
         seeds=seeds_onevector,
@@ -801,21 +953,21 @@ def main() :
         ds_out.to_netcdf(output_path)
         
         if (idx + 1) % 10 == 0 :
-            print(f"  Saved {idx + 1}/40 members")
+            print(f"  Saved {idx + 1}/50 members")
     
     elapsed_method1 = time.time() - start_method1
-    print(f"✓ Method 1 complete: {elapsed_method1:.2f}s ({elapsed_method1/40:.2f}s per member)")
+    print(f"✓ Method 1 complete: {elapsed_method1:.2f}s ({elapsed_method1/50:.2f}s per member)")
     print()
     
-    # Method 2: Pointwise 1 (80 members)
+    # Method 2: Pointwise 1 (100 members)
     print("="*80)
-    print("METHOD 2: POINTWISE 1 - 80 MEMBERS (GPU Parallel)")
+    print("METHOD 2: POINTWISE 1 - 100 MEMBERS (GPU Parallel)")
     print("="*80)
     start_method2 = time.time()
     
-    seeds_pointwise1 = [args.base_seed + 1000 + i for i in range(80)]
+    seeds_pointwise1 = [args.base_seed + 1000 + i for i in range(100)]
     perturbed_states = generator.generate_batch_perturbations(
-        perturbation_type='pointwise_1',
+        perturbation_type='pointwise',
         seeds=seeds_pointwise1,
         is_same_noise_in_time=False,
         is_same_noise_for_component=False
@@ -841,50 +993,10 @@ def main() :
         ds_out.to_netcdf(output_path)
         
         if (idx + 1) % 20 == 0:
-            print(f"  Saved {idx + 1}/80 members")
+            print(f"  Saved {idx + 1}/100 members")
     
     elapsed_method2 = time.time() - start_method2
-    print(f"✓ Method 2 complete: {elapsed_method2:.2f}s ({elapsed_method2/80:.2f}s per member)")
-    print()
-    
-    # Method 3: Pointwise 2 (80 members)
-    print("="*80)
-    print("METHOD 3: POINTWISE 2 - 80 MEMBERS (GPU Parallel)")
-    print("="*80)
-    start_method3 = time.time()
-    
-    seeds_pointwise2 = [args.base_seed + 2000 + i for i in range(80)]
-    perturbed_states = generator.generate_batch_perturbations(
-        perturbation_type='pointwise_2',
-        seeds=seeds_pointwise2,
-        is_same_noise_in_time=False,
-        is_same_noise_for_component=False
-    )
-    
-    # Save results
-    for idx, state in enumerate(perturbed_states) :
-        output_path = pointwise2_dir / f"member_{idx:03d}_initial_condition.nc"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        ds_out = xr.Dataset({
-            "data": xr.DataArray(
-                state.squeeze(0),
-                dims=["time", "ch", "lat", "lon"],
-                coords={
-                    "time": generator.dataset["data"].time,
-                    "ch": generator.dataset["data"].ch,
-                    "lat": generator.dataset["data"].lat,
-                    "lon": generator.dataset["data"].lon
-                }
-            )
-        })
-        ds_out.to_netcdf(output_path)
-        
-        if (idx + 1) % 20 == 0:
-            print(f"  Saved {idx + 1}/80 members")
-    
-    elapsed_method3 = time.time() - start_method3
-    print(f"✓ Method 3 complete: {elapsed_method3:.2f}s ({elapsed_method3/80:.2f}s per member)")
+    print(f"✓ Method 2 complete: {elapsed_method2:.2f}s ({elapsed_method2/100:.2f}s per member)")
     print()
     
     # Summary
@@ -892,10 +1004,9 @@ def main() :
     print("="*80)
     print("GPU-ACCELERATED ENSEMBLE GENERATION COMPLETE")
     print("="*80)
-    print(f"Total time: {total_time:.2f}s ({total_time/200:.2f}s per member)")
-    print(f"  - Method 1 (40 members): {elapsed_method1:.2f}s")
-    print(f"  - Method 2 (80 members): {elapsed_method2:.2f}s")
-    print(f"  - Method 3 (80 members): {elapsed_method3:.2f}s")
+    print(f"Total time: {total_time:.2f}s ({total_time/150:.2f}s per member)")
+    print(f"  - Method 1 (50 members): {elapsed_method1:.2f}s")
+    print(f"  - Method 2 (100 members): {elapsed_method2:.2f}s")
     print()
     print(f"Speedup factor: Processing {args.batch_size} members in parallel")
     print()
@@ -903,13 +1014,11 @@ def main() :
     # Verify
     onevector_count = len(list(onevector_dir.glob("member_*_initial_condition.nc")))
     pointwise1_count = len(list(pointwise1_dir.glob("member_*_initial_condition.nc")))
-    pointwise2_count = len(list(pointwise2_dir.glob("member_*_initial_condition.nc")))
     
     print("Verification:")
-    print(f"  - One vector:  {onevector_count}/40")
-    print(f"  - Pointwise 1: {pointwise1_count}/80")
-    print(f"  - Pointwise 2: {pointwise2_count}/80")
-    print(f"  - Total:       {onevector_count + pointwise1_count + pointwise2_count}/200")
+    print(f"  - One vector:  {onevector_count}/50")
+    print(f"  - Pointwise 1: {pointwise1_count}/100")
+    print(f"  - Total:       {onevector_count + pointwise1_count}/150")
     print()
 
 

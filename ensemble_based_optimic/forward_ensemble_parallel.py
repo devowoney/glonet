@@ -21,7 +21,7 @@ sys.path.insert(1, '/Odyssey/private/j25lee/glonet/glonet_daily_forecast_local')
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 INPUT_LOCATION = "/Odyssey/public/glonet"
 user = os.environ.get("USER")
-DEFAULT_OUTPUT_LOCATION = f"/Odyssey/private/{user}/glonet/output"
+# DEFAULT_OUTPUT_LOCATION = f"/Odyssey/private/{user}/glonet/output"
 
 # Setup logging
 logging.basicConfig(
@@ -548,7 +548,8 @@ def aforecast3_batch(d_batch, dates, cycle: int, device):
     return all_datasets
 
 
-def load_batch_data(member_files: List[Path]) -> tuple:
+def load_batch_data(member_files: List[Path], 
+                    perturbation_type: str) -> tuple:
     """Load multiple ensemble members into batched xarray datasets"""
     batch_data = []
     dates = []
@@ -556,6 +557,11 @@ def load_batch_data(member_files: List[Path]) -> tuple:
     
     for member_file in member_files:
         rdata = xr.open_dataset(member_file)
+        
+        # For repeat loop 
+        if perturbation_type == "none" or perturbation_type == "None":
+            rdata = rdata.isel(t=slice(0, 1))  # Select only the first time step for unperturbed members
+            
         batch_data.append(rdata)
         date = rdata.time.data[1].astype("M8[D]").astype(datetime)
         dates.append(date)
@@ -567,11 +573,12 @@ def load_batch_data(member_files: List[Path]) -> tuple:
     return batch_dataset, dates, member_names
 
 
-def create_forecast_batch(member_files: List[Path],
-                         forecast_cycle: int,
-                         output_path: str,
-                         device,
-                         rank: int) -> List[xr.Dataset]:
+def create_forecast_batch(member_files: List[Path], 
+                          perturbation_type: str, 
+                          forecast_cycle: int,
+                          output_path: str,
+                          device,
+                          rank: int) -> List[xr.Dataset]:
     """Create forecasts for a batch of ensemble members"""
     
     batch_size = len(member_files)
@@ -579,7 +586,11 @@ def create_forecast_batch(member_files: List[Path],
     logger.info(f"[Task {rank}, GPU {device}] Processing batch of {batch_size} members...")
     
     # Load batch data
-    batch_dataset, dates, member_names = load_batch_data(member_files)
+    batch_dataset, dates, member_names = load_batch_data(member_files, perturbation_type=perturbation_type)
+    
+    # Extract original lat/lon coordinates before processing
+    original_lat = batch_dataset.lat.values
+    original_lon = batch_dataset.lon.values
     
     start_datetime = str(dates[0] - timedelta(days=1))
     end_datetime = str(dates[0] + timedelta(days=forecast_cycle))
@@ -629,10 +640,8 @@ def create_forecast_batch(member_files: List[Path],
         combined_tensor = combined_tensor.squeeze(0)  # [time, 85, lat, lon]
         
         # Create xarray Dataset with proper coordinates
-        # You'll need to create proper coordinate arrays
         num_time = combined_tensor.shape[0]
-        # time_coords = [dates[b] + timedelta(days=i*2) for i in range(1, num_time + 1)]
-        time_coords = np.array([dates[b] + timedelta(days=i*2) for i in range(1, num_time + 1)], dtype='datetime64[ns]')
+        time_coords = np.array([dates[b] + timedelta(days=i) for i in range(1, num_time + 1)], dtype='datetime64[ns]')
         ds = xr.Dataset(
             {
                 'data': (['time', 'ch', 'lat', 'lon'], combined_tensor.numpy())
@@ -640,8 +649,8 @@ def create_forecast_batch(member_files: List[Path],
             coords={
                 'time': time_coords,
                 'ch': np.arange(85),
-                'lat': np.arange(combined_tensor.shape[2]),  # Replace with actual lat values
-                'lon': np.arange(combined_tensor.shape[3]),  # Replace with actual lon values
+                'lat': original_lat,
+                'lon': original_lon,
             }
         )
         
@@ -734,14 +743,20 @@ def create_forecast_batch(member_files: List[Path],
     return combined4
 
 
-def get_ensemble_files(ensemble_dir: str, ensemble_type: str = "one_vector") -> List[Path]:
+def get_ensemble_files(ensemble_dir: str, ensemble_type: str) -> List[Path]:
     """Get all ensemble member files from directory"""
-    ensemble_path = Path(ensemble_dir) / ensemble_type
-    
+    if ensemble_type == 'none' or ensemble_type == "None":
+        ensemble_path = Path(ensemble_dir) 
+    else :
+        ensemble_path = Path(ensemble_dir) / ensemble_type
+
     if not ensemble_path.exists():
         raise ValueError(f"Ensemble directory not found: {ensemble_path}")
     
-    member_files = sorted(ensemble_path.glob("member_*_initial_condition.nc"))
+    if ensemble_type == 'none' or ensemble_type == "None" :
+        member_files = sorted(ensemble_path.glob("rank*_member_*.nc"))
+    else :
+        member_files = sorted(ensemble_path.glob("member_*_initial_condition.nc"))
     
     if not member_files:
         raise ValueError(f"No ensemble members found in {ensemble_path}")
@@ -757,7 +772,7 @@ def parse_args():
     parser.add_argument(
         "--ensemble-dir",
         type=str,
-        default="/Odyssey/private/j25lee/ncprocessing/ensemble_glorys/ensemble_output_gpu",
+        required=True,
         help="Path to ensemble directory"
     )
     
@@ -765,8 +780,8 @@ def parse_args():
         "--ensemble-type",
         type=str,
         default="one_vector",
-        choices=["one_vector", "pointwise_1", "pointwise_2"],
-        help="Ensemble type subdirectory"
+        choices=["one_vector", "pointwise", "none"],
+        help="Ensemble type subdirectory. 'none' = all members directly in ensemble-dir"
     )
     
     parser.add_argument(
@@ -845,7 +860,10 @@ def main():
     if args.output:
         output_dir = args.output
     else:
-        output_dir = os.path.join(DEFAULT_OUTPUT_LOCATION, args.ensemble_type)
+        if args.ensemble_type == 'none' or args.ensemble_type == "None" :
+            output_dir = os.path.join(args.ensemble_dir, "forward")
+        else:
+            output_dir = os.path.join(args.ensemble_dir, args.ensemble_type, "forward")
     
     # Process assigned members in batches
     batch_size = args.batch_size
@@ -861,6 +879,7 @@ def main():
         try:
             create_forecast_batch(
                 member_files=batch_members,
+                perturbation_type=args.ensemble_type,
                 forecast_cycle=args.forecast_cycle,
                 output_path=output_dir,
                 device=device,
@@ -876,6 +895,7 @@ def main():
                 # try:
                 #     create_forecast(
                 #         rdata_path=member_file,
+                #         perturbation_type=args.ensemble_type,
                 #         forecast_cycle=args.forecast_cycle,
                 #         output_path=output_dir,
                 #         device=device,
