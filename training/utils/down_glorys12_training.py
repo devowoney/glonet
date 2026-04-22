@@ -17,6 +17,22 @@ from pathlib import Path
 MODEL_LOCATION = "/Odyssey/public/glonet/TrainedWeights"
 DEFAULT_OUTPUT_LOCATION = "/Odyssey/public/glonet"
 
+
+def iter_date_chunks(start_date: str, end_date: str, chunk_days: int):
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+
+    if chunk_days <= 0:
+        raise ValueError("chunk_days must be a positive integer")
+    if end_dt < start_dt:
+        raise ValueError("end_date must be greater than or equal to start_date")
+
+    current = start_dt
+    while current <= end_dt:
+        chunk_end = min(current + timedelta(days=chunk_days - 1), end_dt)
+        yield current.isoformat(), chunk_end.isoformat()
+        current = chunk_end + timedelta(days=1)
+
 def get_data(start_date : str, 
              end_date : str, 
              depth : int,
@@ -142,9 +158,11 @@ def create_depth_data(start: date,
     return create_data(dd, depth)
 
 
-def create_init_states_data(start_date : str, 
+def create_init_states_data(start_date : str,
                             end_date : str,
-                            output_path : str = None) :
+                            output_path : str = None,
+                            chunk_days: int = 30,
+                            combine_chunks: bool = False) :
     
     function_map = {
         "1" : glo_in1,
@@ -160,30 +178,50 @@ def create_init_states_data(start_date : str,
     
     os.makedirs(out_location, exist_ok=True)
     
-    # Collect all datasets
-    datasets = []
-    for i in ["1", "2", "3"] :
-        dataset = create_depth_data(start_date, end_date, function_map[i], int(i) - 1)
-        datasets.append(dataset)
-        del dataset
-    
-    # Concatenate along 'ch' dimension
-    combined_dataset = concat(datasets, dim="ch")
-    del datasets
-    gc.collect()
-    
-    # Reassign the `ch` dimension to ensure it is unique and sequential
-    combined_dataset = combined_dataset.assign_coords(
-        ch=("ch", numpy.arange(combined_dataset.sizes["ch"]))
-    )
+    chunk_files = []
 
-    # Write the concatenated dataset to a single NetCDF file
-    output_file = f"{out_location}/combined_input.nc"
-    combined_dataset.to_netcdf(output_file)
-    
-    print(f"Copernicus Marine data is completely downloaded and concatenated in < {output_file} >")
-    
-    return combined_dataset   
+    for chunk_start, chunk_end in iter_date_chunks(start_date, end_date, chunk_days):
+        print(f"Processing chunk {chunk_start} to {chunk_end}")
+
+        datasets = []
+        for i in ["1", "2", "3"]:
+            dataset = create_depth_data(chunk_start, chunk_end, function_map[i], int(i) - 1)
+            datasets.append(dataset)
+            del dataset
+
+        # Concatenate along 'ch' dimension for this chunk only.
+        combined_dataset = concat(datasets, dim="ch")
+        del datasets
+        gc.collect()
+
+        combined_dataset = combined_dataset.assign_coords(
+            ch=("ch", numpy.arange(combined_dataset.sizes["ch"]))
+        )
+
+        chunk_file = f"{out_location}/combined_input_{chunk_start}_to_{chunk_end}.nc"
+        combined_dataset.to_netcdf(chunk_file)
+        chunk_files.append(chunk_file)
+        print(f"Chunk saved: < {chunk_file} >")
+
+        combined_dataset.close()
+        del combined_dataset
+        gc.collect()
+
+    if combine_chunks:
+        print("Combining chunk files into a single file. This can still be memory intensive for very large ranges.")
+        datasets_to_combine = [open_dataset(path) for path in chunk_files]
+        merged_all = concat(datasets_to_combine, dim="time")
+        output_file = f"{out_location}/combined_input.nc"
+        merged_all.to_netcdf(output_file)
+        for ds in datasets_to_combine:
+            ds.close()
+        merged_all.close()
+        gc.collect()
+        print(f"All chunks combined in < {output_file} >")
+
+    print(f"Copernicus Marine data download completed with {len(chunk_files)} chunk file(s) in < {out_location} >")
+
+    return chunk_files
 
 # Parseargs setting
 def parse_args () :
@@ -207,6 +245,18 @@ def parse_args () :
                         type = Path,
                         required = False,
                         help = "Output file path.")
+
+    parser.add_argument("--chunk_days", "-c",
+                        dest = "chunk_days",
+                        type = int,
+                        required = False,
+                        default = 30,
+                        help = "Number of days per download chunk. Smaller values reduce memory usage.")
+
+    parser.add_argument("--combine_chunks",
+                        dest="combine_chunks",
+                        action="store_true",
+                        help="Also combine all chunk files into one NetCDF file after download.")
     
     return parser.parse_args()
 
@@ -216,7 +266,9 @@ def main() :
 
     create_init_states_data(start_date= args.start_date, 
                             end_date= args.end_date,
-                            output_path= args.out_path)
+                            output_path= args.out_path,
+                            chunk_days=args.chunk_days,
+                            combine_chunks=args.combine_chunks)
 
 if __name__ == "__main__":
     main()
