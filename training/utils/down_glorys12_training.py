@@ -199,9 +199,13 @@ def create_init_states_data(start_date : str,
         )
 
         chunk_file = f"{out_location}/combined_input_{chunk_start}_to_{chunk_end}.nc"
-        combined_dataset.to_netcdf(chunk_file)
+        
+        if not combine_chunks :
+            combined_dataset.to_netcdf(chunk_file)
+            print(f"Chunk saved: < {chunk_file} >")
+        
         chunk_files.append(chunk_file)
-        print(f"Chunk saved: < {chunk_file} >")
+
 
         combined_dataset.close()
         del combined_dataset
